@@ -41,6 +41,12 @@ jobs:
           exit 1
         fi
         echo "✅ 환경변수 확인 완료"
+
+    - name: GOOGLE_CREDENTIALS 디코딩
+      env:
+        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+      run: |
+        echo "$GOOGLE_CREDENTIALS" | base64 -d > credentials.json
     
     - name: 뉴스 수집 실행 (재시도 포함)
       env:
