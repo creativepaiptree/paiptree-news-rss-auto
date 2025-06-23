@@ -1,0 +1,5 @@
+feedparser==6.0.10
+gspread==5.12.4
+oauth2client==4.1.3
+requests==2.31.0
+python-dateutil==2.8.2
