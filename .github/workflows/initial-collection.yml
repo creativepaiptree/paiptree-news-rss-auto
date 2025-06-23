@@ -63,13 +63,8 @@ jobs:
           echo "📅 최근 뉴스 모드: 최근 7일 이내 뉴스만 수집"
         fi
         
-<<<<<<< HEAD
-        # 향상된 스크립트 실행
-        python rss_scraper_enhanced.py
-=======
-        # 기존 스크립트 실행 (수정된 버전)
+        # 기존 스크립트 실행
         python rss_scraper.py
->>>>>>> 8088e0dda43160fc86269a4ed9773724d70ae2ca
     
     - name: 수집 결과 요약
       if: always()
