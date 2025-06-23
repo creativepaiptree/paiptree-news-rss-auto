@@ -1,5 +1,4 @@
 name: 📚 Paiptree News Initial Collection
-
 on:
   # 수동 실행 전용 (초기 설정시에만 사용)
   workflow_dispatch:
