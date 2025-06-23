@@ -19,6 +19,7 @@ def get_config():
         # Google Sheets 인증 정보 (파일에서 읽음으로 변경됨)
         with open('credentials.json') as f:
             creds_dict = json.load(f)
+        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
 
         # Google Sheets ID
         sheets_id = os.environ.get('GOOGLE_SHEETS_ID')
