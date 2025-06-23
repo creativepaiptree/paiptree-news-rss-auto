@@ -43,13 +43,21 @@ jobs:
     - name: GOOGLE_CREDENTIALS 디코딩
       run: |
         echo "$GOOGLE_CREDENTIALS" | base64 -d > credentials.json
+        echo "✅ 디코딩 완료"
       env:
         GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
 
-    - name: 디코딩된 credentials.json 확인
+    - name: credentials.json 존재 및 사이즈 확인
       run: |
-        echo "📄 credentials.json 내용:"
-        cat credentials.json || echo "(파일 없음 또는 비어 있음)"
+        echo "📦 credentials.json 상태:"
+        ls -l credentials.json || echo "❌ 파일 없음"
+        echo "📄 파일 크기 (bytes):"
+        stat --printf="%s bytes\n" credentials.json || stat -f%z credentials.json || echo "❌ stat 실패"
+
+    - name: 디코딩된 credentials.json 내용 일부 확인
+      run: |
+        echo "📄 credentials.json 앞부분:"
+        head -n 5 credentials.json || echo "(비어 있음)"
 
     - name: 뉴스 수집 실행 (재시도 포함)
       env:
