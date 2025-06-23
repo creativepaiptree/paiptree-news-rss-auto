@@ -1,5 +1,4 @@
-{
-  `content`: `#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 import feedparser
@@ -15,52 +14,52 @@ import sys
 
 # 환경변수에서 설정 읽기
 def get_config():
-    \"\"\"환경변수에서 설정 정보 읽기\"\"\"
+    """환경변수에서 설정 정보 읽기"""
     try:
         # Google Sheets 인증 정보
         google_creds = os.environ.get('GOOGLE_CREDENTIALS')
         if not google_creds:
-            raise ValueError(\"GOOGLE_CREDENTIALS 환경변수가 설정되지 않았습니다.\")
+            raise ValueError("GOOGLE_CREDENTIALS 환경변수가 설정되지 않았습니다.")
         
         # JSON 파싱 (환경변수는 이미 JSON 문자열)
         try:
             creds_dict = json.loads(google_creds)
-            print(\"✅ Google Credentials JSON 파싱 성공\")
+            print("✅ Google Credentials JSON 파싱 성공")
         except json.JSONDecodeError as e:
-            print(f\"❌ JSON 파싱 실패: {e}\")
-            print(f\"📝 받은 데이터 길이: {len(google_creds)} 문자\")
-            print(f\"📝 데이터 시작 부분: {google_creds[:100]}...\")
-            raise ValueError(f\"GOOGLE_CREDENTIALS JSON 파싱 실패: {e}\")
+            print(f"❌ JSON 파싱 실패: {e}")
+            print(f"📝 받은 데이터 길이: {len(google_creds)} 문자")
+            print(f"📝 데이터 시작 부분: {google_creds[:100]}...")
+            raise ValueError(f"GOOGLE_CREDENTIALS JSON 파싱 실패: {e}")
         
         # Google Sheets ID
         sheets_id = os.environ.get('GOOGLE_SHEETS_ID')
         if not sheets_id:
-            raise ValueError(\"GOOGLE_SHEETS_ID 환경변수가 설정되지 않았습니다.\")
+            raise ValueError("GOOGLE_SHEETS_ID 환경변수가 설정되지 않았습니다.")
         
-        print(f\"✅ Google Sheets ID: {sheets_id[:20]}...\")
+        print(f"✅ Google Sheets ID: {sheets_id[:20]}...")
         return creds_dict, sheets_id
         
     except Exception as e:
-        print(f\"❌ 설정 읽기 실패: {e}\")
+        print(f"❌ 설정 읽기 실패: {e}")
         sys.exit(1)
 
 # RSS 피드 목록 - 네이버 뉴스 검색 (키워드별)
 RSS_FEEDS = [
-    \"http://newssearch.naver.com/search.naver?where=rss&query=파이프트리\",
-    \"http://newssearch.naver.com/search.naver?where=rss&query=파머스마인드\", 
-    \"http://newssearch.naver.com/search.naver?where=rss&query=paiptree\",
-    \"http://newssearch.naver.com/search.naver?where=rss&query=farmersmind\"
+    "http://newssearch.naver.com/search.naver?where=rss&query=파이프트리",
+    "http://newssearch.naver.com/search.naver?where=rss&query=파머스마인드", 
+    "http://newssearch.naver.com/search.naver?where=rss&query=paiptree",
+    "http://newssearch.naver.com/search.naver?where=rss&query=farmersmind"
 ]
 
 # 검색 키워드 (이미 RSS에서 필터링되므로 전체 매칭)
 KEYWORDS = [
-    \"파이프트리\", \"파머스마인드\", \"paiptree\", \"farmersmind\"
+    "파이프트리", "파머스마인드", "paiptree", "farmersmind"
 ]
 
 def setup_google_sheets(creds_dict, sheets_id):
-    \"\"\"Google Sheets 연결 설정\"\"\"
+    """Google Sheets 연결 설정"""
     try:
-        print(\"🔗 Google Sheets 연결 중...\")
+        print("🔗 Google Sheets 연결 중...")
         
         # 인증 범위 설정
         scope = [
@@ -78,9 +77,9 @@ def setup_google_sheets(creds_dict, sheets_id):
         # news_data 워크시트 가져오기 또는 생성
         try:
             worksheet = sheet.worksheet('news_data')
-            print(\"✅ 기존 news_data 시트 발견\")
+            print("✅ 기존 news_data 시트 발견")
         except gspread.WorksheetNotFound:
-            print(\"📝 news_data 시트 생성 중...\")
+            print("📝 news_data 시트 생성 중...")
             worksheet = sheet.add_worksheet(title='news_data', rows=1000, cols=21)
             
             # Materials 표준 21개 컬럼 (A-U) 헤더 추가
@@ -92,28 +91,28 @@ def setup_google_sheets(creds_dict, sheets_id):
                 'original_url', 'status', 'featured', 'created_at'                  # R-U
             ]
             worksheet.append_row(headers)
-            print(\"✅ news_data 시트 생성 완료\")
+            print("✅ news_data 시트 생성 완료")
         
         return worksheet
     except Exception as e:
-        print(f\"❌ Google Sheets 연결 실패: {e}\")
+        print(f"❌ Google Sheets 연결 실패: {e}")
         sys.exit(1)
 
 def fetch_rss_news(rss_url, keywords, initial_mode=False):
-    \"\"\"RSS 피드에서 뉴스 가져오기\"\"\"
+    """RSS 피드에서 뉴스 가져오기"""
     news_items = []
     
     try:
-        print(f\"📡 RSS 피드 확인 중: {rss_url}\")
+        print(f"📡 RSS 피드 확인 중: {rss_url}")
         
         # RSS 피드 파싱
         feed = feedparser.parse(rss_url)
         
         if feed.bozo:
-            print(f\"⚠️ RSS 피드 파싱 경고: {rss_url}\")
+            print(f"⚠️ RSS 피드 파싱 경고: {rss_url}")
         
         total_entries = len(feed.entries) if hasattr(feed, 'entries') else 0
-        print(f\"📊 총 {total_entries}개 RSS 엔트리 발견\")
+        print(f"📊 총 {total_entries}개 RSS 엔트리 발견")
         
         # 초기 모드일 때는 모든 뉴스 수집, 일반 모드일 때는 최근 뉴스만
         entries_to_process = feed.entries if hasattr(feed, 'entries') else []
@@ -132,9 +131,9 @@ def fetch_rss_news(rss_url, keywords, initial_mode=False):
                     # 날짜 정보가 없으면 최근으로 간주
                     recent_entries.append(entry)
             entries_to_process = recent_entries
-            print(f\"🗓️ 최근 7일 이내 뉴스: {len(entries_to_process)}개\")
+            print(f"🗓️ 최근 7일 이내 뉴스: {len(entries_to_process)}개")
         else:
-            print(f\"🎯 초기 수집 모드: 모든 가능한 뉴스 ({len(entries_to_process)}개) 처리\")
+            print(f"🎯 초기 수집 모드: 모든 가능한 뉴스 ({len(entries_to_process)}개) 처리")
         
         # 각 뉴스 아이템 확인
         for entry in entries_to_process:
@@ -143,7 +142,7 @@ def fetch_rss_news(rss_url, keywords, initial_mode=False):
             link = entry.get('link', '')
             
             # 키워드 매칭 확인
-            content_to_check = f\"{title} {description}\".lower()
+            content_to_check = f"{title} {description}".lower()
             matched_keywords = [kw for kw in keywords if kw.lower() in content_to_check]
             
             if matched_keywords:
@@ -160,9 +159,9 @@ def fetch_rss_news(rss_url, keywords, initial_mode=False):
                 source = feed.feed.get('title', 'Unknown')
                 
                 # 썸네일 이미지 추출 시도
-                thumbnail_url = \"\"
+                thumbnail_url = ""
                 if hasattr(entry, 'media_thumbnail'):
-                    thumbnail_url = entry.media_thumbnail[0]['url'] if entry.media_thumbnail else \"\"
+                    thumbnail_url = entry.media_thumbnail[0]['url'] if entry.media_thumbnail else ""
                 elif hasattr(entry, 'enclosures') and entry.enclosures:
                     for enc in entry.enclosures:
                         if enc.type.startswith('image/'):
@@ -182,21 +181,21 @@ def fetch_rss_news(rss_url, keywords, initial_mode=False):
                 }
                 
                 news_items.append(news_item)
-                print(f\"✅ 키워드 매칭: {title[:50]}... (키워드: {matched_keywords}) [{pub_date}]\")
+                print(f"✅ 키워드 매칭: {title[:50]}... (키워드: {matched_keywords}) [{pub_date}]")
         
-        print(f\"📊 {rss_url}에서 {len(news_items)}개 매칭 뉴스 발견\")
+        print(f"📊 {rss_url}에서 {len(news_items)}개 매칭 뉴스 발견")
         return news_items
         
     except Exception as e:
-        print(f\"❌ RSS 피드 처리 실패 {rss_url}: {e}\")
+        print(f"❌ RSS 피드 처리 실패 {rss_url}: {e}")
         return []
 
 def generate_sequential_id(worksheet):
-    \"\"\"기존 데이터 확인해서 다음 번호 생성 (001, 002, 003...)\"\"\"
+    """기존 데이터 확인해서 다음 번호 생성 (001, 002, 003...)"""
     try:
         all_records = worksheet.get_all_records()
         if not all_records:
-            return \"001\"
+            return "001"
         
         # 기존 ID에서 숫자 추출해서 최대값 찾기
         max_num = 0
@@ -211,15 +210,15 @@ def generate_sequential_id(worksheet):
         
         # 다음 번호를 3자리로 포맷팅
         next_num = max_num + 1
-        return f\"{next_num:03d}\"
+        return f"{next_num:03d}"
         
     except Exception as e:
-        print(f\"⚠️ ID 생성 실패, 임시 ID 사용: {e}\")
+        print(f"⚠️ ID 생성 실패, 임시 ID 사용: {e}")
         # 실패시 타임스탬프 기반 ID
-        return f\"{int(time.time() % 10000):04d}\"
+        return f"{int(time.time() % 10000):04d}"
 
 def is_duplicate_news(worksheet, original_url):
-    \"\"\"중복 뉴스 확인 (URL 기반)\"\"\"
+    """중복 뉴스 확인 (URL 기반)"""
     try:
         # 모든 기존 데이터 가져오기
         all_records = worksheet.get_all_records()
@@ -231,15 +230,15 @@ def is_duplicate_news(worksheet, original_url):
         
         return False
     except Exception as e:
-        print(f\"⚠️ 중복 확인 실패: {e}\")
+        print(f"⚠️ 중복 확인 실패: {e}")
         return False
 
 def add_news_to_sheet(worksheet, news_item):
-    \"\"\"Google Sheets에 뉴스 추가\"\"\"
+    """Google Sheets에 뉴스 추가"""
     try:
         # 중복 확인 (URL 기반)
         if is_duplicate_news(worksheet, news_item['original_url']):
-            print(f\"⏭️ 중복 뉴스 스킵: {news_item['title'][:50]}...\")
+            print(f"⏭️ 중복 뉴스 스킵: {news_item['title'][:50]}...")
             return False
         
         # 순차 ID 생성
@@ -273,26 +272,26 @@ def add_news_to_sheet(worksheet, news_item):
         ]
         
         worksheet.append_row(row_data)
-        print(f\"✅ 뉴스 추가 (ID: {news_id}): {news_item['title'][:50]}...\")
+        print(f"✅ 뉴스 추가 (ID: {news_id}): {news_item['title'][:50]}...")
         return True
         
     except Exception as e:
-        print(f\"❌ 뉴스 추가 실패: {e}\")
+        print(f"❌ 뉴스 추가 실패: {e}")
         return False
 
 def main():
-    \"\"\"메인 실행 함수\"\"\"
-    print(\"🚀 Paiptree 뉴스 수집 시작\")
-    print(f\"📅 실행 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\")
+    """메인 실행 함수"""
+    print("🚀 Paiptree 뉴스 수집 시작")
+    print(f"📅 실행 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     # 초기 수집 모드 확인 (환경변수)
     initial_mode = os.environ.get('INITIAL_COLLECTION', 'false').lower() == 'true'
     
     if initial_mode:
-        print(\"🎯 초기 대량 수집 모드 활성화\")
-        print(\"📚 가능한 모든 과거 뉴스 수집 중...\")
+        print("🎯 초기 대량 수집 모드 활성화")
+        print("📚 가능한 모든 과거 뉴스 수집 중...")
     else:
-        print(\"📅 일반 모드: 최근 7일 이내 뉴스만 수집\")
+        print("📅 일반 모드: 최근 7일 이내 뉴스만 수집")
     
     start_time = time.time()
     
@@ -307,8 +306,8 @@ def main():
     total_found = 0
     all_news_items = []
     
-    print(f\"🔍 {len(RSS_FEEDS)}개 RSS 피드에서 뉴스 검색 중...\")
-    print(f\"🏷️ 검색 키워드: {', '.join(KEYWORDS)}\")
+    print(f"🔍 {len(RSS_FEEDS)}개 RSS 피드에서 뉴스 검색 중...")
+    print(f"🏷️ 검색 키워드: {', '.join(KEYWORDS)}")
     
     for rss_url in RSS_FEEDS:
         news_items = fetch_rss_news(rss_url, KEYWORDS, initial_mode)
@@ -318,8 +317,7 @@ def main():
     # 발행일자 기준으로 정렬 (오래된 것부터)
     all_news_items.sort(key=lambda x: x.get('pub_datetime', datetime.now()))
     
-    print(f\"\
-📊 총 {len(all_news_items)}개 뉴스를 시간순으로 정렬하여 추가 중...\")
+    print(f"\n📊 총 {len(all_news_items)}개 뉴스를 시간순으로 정렬하여 추가 중...")
     
     # 시트에 추가
     for news_item in all_news_items:
@@ -333,20 +331,16 @@ def main():
     end_time = time.time()
     execution_time = round(end_time - start_time, 2)
     
-    print(f\"\
-🎉 뉴스 수집 완료!\")
-    print(f\"🎯 수집 모드: {'초기 대량 수집' if initial_mode else '일반 수집'}\")
-    print(f\"📊 총 발견: {total_found}개\")
-    print(f\"✅ 새로 추가: {total_collected}개\")
-    print(f\"⏱️ 실행 시간: {execution_time}초\")
+    print(f"\n🎉 뉴스 수집 완료!")
+    print(f"🎯 수집 모드: {'초기 대량 수집' if initial_mode else '일반 수집'}")
+    print(f"📊 총 발견: {total_found}개")
+    print(f"✅ 새로 추가: {total_collected}개")
+    print(f"⏱️ 실행 시간: {execution_time}초")
     
     if total_collected == 0:
-        print(\"ℹ️ 새로운 뉴스가 없습니다.\")
+        print("ℹ️ 새로운 뉴스가 없습니다.")
     else:
-        print(f\"🌟 {total_collected}개의 새로운 뉴스가 추가되었습니다!\")
+        print(f"🌟 {total_collected}개의 새로운 뉴스가 추가되었습니다!")
 
-if __name__ == \"__main__\":
+if __name__ == "__main__":
     main()
-`,
-  `path`: `/Users/zoro/projects/news-rss-auto/rss_scraper_enhanced.py`
-}
