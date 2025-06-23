@@ -1,30 +1,23 @@
 name: Paiptree News Collector
-
 on:
   schedule:
-    # 매일 오전 8시 (KST) = UTC 23시에 실행
     - cron: '0 23 * * *'
   workflow_dispatch:
-
 jobs:
   collect-news:
     runs-on: ubuntu-latest
-
     steps:
     - name: 저장소 체크아웃
       uses: actions/checkout@v4
-
     - name: Python 설정
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
         cache: 'pip'
-
     - name: 의존성 설치
       run: |
         pip install --upgrade pip
         pip install -r requirements.txt
-
     - name: 환경변수 검증
       env:
         GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
@@ -39,26 +32,6 @@ jobs:
           exit 1
         fi
         echo "✅ 환경변수 확인 완료"
-
-    - name: GOOGLE_CREDENTIALS 디코딩
-      run: |
-        echo "$GOOGLE_CREDENTIALS" | base64 -d > credentials.json
-        echo "✅ 디코딩 완료"
-      env:
-        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-
-    - name: credentials.json 존재 및 사이즈 확인
-      run: |
-        echo "📦 credentials.json 상태:"
-        ls -l credentials.json || echo "❌ 파일 없음"
-        echo "📄 파일 크기 (bytes):"
-        stat --printf="%s bytes\n" credentials.json || stat -f%z credentials.json || echo "❌ stat 실패"
-
-    - name: 디코딩된 credentials.json 내용 일부 확인
-      run: |
-        echo "📄 credentials.json 앞부분:"
-        head -n 5 credentials.json || echo "(비어 있음)"
-
     - name: 뉴스 수집 실행 (재시도 포함)
       env:
         GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
@@ -80,14 +53,6 @@ jobs:
             sleep 30
           fi
         done
-
-    - name: 성공 알림 (선택사항)
-      if: success() && vars.SLACK_WEBHOOK_URL
-      run: |
-        curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"🎉 Paiptree 뉴스 수집 완료! ($(date))"}' \
-          ${{ vars.SLACK_WEBHOOK_URL }}
-
     - name: 실행 결과 알림
       if: always()
       run: |
