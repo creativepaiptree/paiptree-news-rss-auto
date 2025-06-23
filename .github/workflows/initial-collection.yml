@@ -1,0 +1,83 @@
+{
+  `path`: `/Users/zoro/projects/news-rss-auto/.github/workflows/initial-collection.yml`,
+  `content`: `name: 📚 Paiptree News Initial Collection
+
+on:
+  # 수동 실행 전용 (초기 설정시에만 사용)
+  workflow_dispatch:
+    inputs:
+      collection_mode:
+        description: '수집 모드 선택'
+        required: true
+        default: 'initial'
+        type: choice
+        options:
+        - initial
+        - recent
+
+jobs:
+  initial-collection:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 저장소 체크아웃
+      uses: actions/checkout@v4
+    
+    - name: Python 설정
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: 의존성 설치
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: 환경변수 검증
+      env:
+        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+      run: |
+        if [[ -z \"$GOOGLE_CREDENTIALS\" ]]; then
+          echo \"❌ GOOGLE_CREDENTIALS 누락\"
+          exit 1
+        fi
+        if [[ -z \"$GOOGLE_SHEETS_ID\" ]]; then
+          echo \"❌ GOOGLE_SHEETS_ID 누락\"
+          exit 1
+        fi
+        echo \"✅ 환경변수 확인 완료\"
+    
+    - name: 초기 뉴스 대량 수집 실행
+      env:
+        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+        INITIAL_COLLECTION: ${{ github.event.inputs.collection_mode == 'initial' && 'true' || 'false' }}
+      run: |
+        echo \"🚀 Paiptree 초기 뉴스 수집 시작\"
+        echo \"📅 실행 시간: $(date)\"
+        echo \"🎯 수집 모드: ${{ github.event.inputs.collection_mode }}\"
+        
+        if [[ \"${{ github.event.inputs.collection_mode }}\" == \"initial\" ]]; then
+          echo \"📚 초기 대량 수집 모드: 가능한 모든 과거 뉴스 수집\"
+        else
+          echo \"📅 최근 뉴스 모드: 최근 7일 이내 뉴스만 수집\"
+        fi
+        
+        # 향상된 스크립트 실행
+        python rss_scraper_enhanced.py
+    
+    - name: 수집 결과 요약
+      if: always()
+      run: |
+        echo \"🎉 초기 뉴스 수집 완료!\"
+        echo \"📅 완료 시간: $(date)\"
+        echo \"✅ 상태: ${{ job.status }}\"
+        echo \"\"
+        echo \"💡 다음 단계:\"
+        echo \"1. Google Sheets에서 수집된 뉴스 데이터 확인\"
+        echo \"2. 정기 수집을 위해 기본 워크플로우 활성화\"
+        echo \"3. 매일 자동 수집이 정상 작동하는지 모니터링\"
+`
+}
