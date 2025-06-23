@@ -43,11 +43,19 @@ def get_config():
         print(f"❌ 설정 읽기 실패: {e}")
         sys.exit(1)
 
+<<<<<<< HEAD
 # RSS 피드 목록 - Google News 검색 (키워드별)
 RSS_FEEDS = [
     "https://news.google.com/rss/search?q=파이프트리&hl=ko&gl=KR&ceid=KR:ko",
     "https://news.google.com/rss/search?q=파머스마인드&hl=ko&gl=KR&ceid=KR:ko", 
     "https://news.google.com/rss/search?q=paiptree&hl=ko&gl=KR&ceid=KR:ko",
+=======
+# RSS 피드 목록 - 구글 뉴스 검색 (키워드별)
+RSS_FEEDS = [
+    "https://news.google.com/rss/search?q=파이프트리&hl=ko&gl=KR&ceid=KR:ko",
+    "https://news.google.com/rss/search?q=파머스마인드&hl=ko&gl=KR&ceid=KR:ko",
+    "https://news.google.com/rss/search?q=paiptree&hl=ko&gl=KR&ceid=KR:ko", 
+>>>>>>> 8088e0dda43160fc86269a4ed9773724d70ae2ca
     "https://news.google.com/rss/search?q=farmersmind&hl=ko&gl=KR&ceid=KR:ko"
 ]
 
@@ -192,6 +200,36 @@ def fetch_rss_news(rss_url, keywords, initial_mode=False):
 
 def generate_sequential_id(worksheet):
     """기존 데이터 확인해서 다음 번호 생성 (001, 002, 003...)"""
+<<<<<<< HEAD
+=======
+    try:
+        all_records = worksheet.get_all_records()
+        if not all_records:
+            return "001"
+        
+        # 기존 ID에서 숫자 추출해서 최대값 찾기
+        max_num = 0
+        for record in all_records:
+            try:
+                current_id = str(record.get('id', '0'))
+                # 숫자만 추출 (앞의 0 제거)
+                num = int(current_id.lstrip('0')) if current_id.strip() else 0
+                max_num = max(max_num, num)
+            except (ValueError, TypeError):
+                continue
+        
+        # 다음 번호를 3자리로 포맷팅
+        next_num = max_num + 1
+        return f"{next_num:03d}"
+        
+    except Exception as e:
+        print(f"⚠️ ID 생성 실패, 임시 ID 사용: {e}")
+        # 실패시 타임스탬프 기반 ID
+        return f"{int(time.time() % 10000):04d}"
+
+def is_duplicate_news(worksheet, original_url):
+    """중복 뉴스 확인 (URL 기반)"""
+>>>>>>> 8088e0dda43160fc86269a4ed9773724d70ae2ca
     try:
         # API 호출 제한 고려하여 대기
         time.sleep(1.0)
@@ -279,9 +317,12 @@ def add_news_to_sheet(worksheet, news_item):
         
         worksheet.append_row(row_data)
         print(f"✅ 뉴스 추가 (ID: {news_id}): {news_item['title'][:50]}...")
+<<<<<<< HEAD
         
         # API 호출 제한 고려하여 추가 대기
         time.sleep(1.5)
+=======
+>>>>>>> 8088e0dda43160fc86269a4ed9773724d70ae2ca
         return True
         
     except Exception as e:
@@ -327,12 +368,21 @@ def main():
     all_news_items.sort(key=lambda x: x.get('pub_datetime', datetime.now()))
     
     print(f"\n📊 총 {len(all_news_items)}개 뉴스를 시간순으로 정렬하여 추가 중...")
+<<<<<<< HEAD
     print("⏰ API 호출 제한 고려하여 안전한 속도로 처리합니다...")
+=======
+>>>>>>> 8088e0dda43160fc86269a4ed9773724d70ae2ca
     
     # 시트에 추가
     for news_item in all_news_items:
         if add_news_to_sheet(worksheet, news_item):
             total_collected += 1
+<<<<<<< HEAD
+=======
+        
+        # API 호출 제한 고려하여 잠시 대기
+        time.sleep(0.5)
+>>>>>>> 8088e0dda43160fc86269a4ed9773724d70ae2ca
     
     # 실행 결과
     end_time = time.time()
