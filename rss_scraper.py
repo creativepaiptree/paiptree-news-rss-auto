@@ -43,12 +43,12 @@ def get_config():
         print(f"❌ 설정 읽기 실패: {e}")
         sys.exit(1)
 
-# RSS 피드 목록 - 네이버 뉴스 검색 (키워드별)
+# RSS 피드 목록 - 구글 뉴스 검색 (키워드별)
 RSS_FEEDS = [
-    "http://newssearch.naver.com/search.naver?where=rss&query=파이프트리",
-    "http://newssearch.naver.com/search.naver?where=rss&query=파머스마인드", 
-    "http://newssearch.naver.com/search.naver?where=rss&query=paiptree",
-    "http://newssearch.naver.com/search.naver?where=rss&query=farmersmind"
+    "https://news.google.com/rss/search?q=파이프트리&hl=ko&gl=KR&ceid=KR:ko",
+    "https://news.google.com/rss/search?q=파머스마인드&hl=ko&gl=KR&ceid=KR:ko",
+    "https://news.google.com/rss/search?q=paiptree&hl=ko&gl=KR&ceid=KR:ko", 
+    "https://news.google.com/rss/search?q=farmersmind&hl=ko&gl=KR&ceid=KR:ko"
 ]
 
 # 검색 키워드 (이미 RSS에서 필터링되므로 전체 매칭)
