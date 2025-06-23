@@ -1,0 +1,80 @@
+name: Paiptree News Collector
+
+on:
+  schedule:
+    # 매일 오전 8시 (KST) = UTC 23시에 실행
+    - cron: '0 23 * * *'
+  
+  # 수동 실행 가능
+  workflow_dispatch:
+
+jobs:
+  collect-news:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 저장소 체크아웃
+      uses: actions/checkout@v4
+    
+    - name: Python 설정
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: 의존성 설치
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: 환경변수 검증
+      env:
+        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+      run: |
+        if [[ -z "$GOOGLE_CREDENTIALS" ]]; then
+          echo "❌ GOOGLE_CREDENTIALS 누락"
+          exit 1
+        fi
+        if [[ -z "$GOOGLE_SHEETS_ID" ]]; then
+          echo "❌ GOOGLE_SHEETS_ID 누락"
+          exit 1
+        fi
+        echo "✅ 환경변수 확인 완료"
+    
+    - name: 뉴스 수집 실행 (재시도 포함)
+      env:
+        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+      run: |
+        echo "🚀 Paiptree 뉴스 수집 시작"
+        echo "📅 실행 시간: $(date)"
+        
+        # 3회 재시도
+        for i in {1..3}; do
+          if python rss_scraper.py; then
+            echo "✅ 수집 성공!"
+            break
+          else
+            echo "❌ 시도 $i 실패"
+            if [[ $i -eq 3 ]]; then
+              echo "💥 모든 재시도 실패"
+              exit 1
+            fi
+            sleep 30
+          fi
+        done
+    
+    - name: 성공 알림 (선택사항)
+      if: success() && vars.SLACK_WEBHOOK_URL
+      run: |
+        curl -X POST -H 'Content-type: application/json' \
+          --data '{"text":"🎉 Paiptree 뉴스 수집 완료! ($(date))"}' \
+          ${{ vars.SLACK_WEBHOOK_URL }}
+    
+    - name: 실행 결과 알림
+      if: always()
+      run: |
+        echo "🎉 Paiptree 뉴스 수집 완료!"
+        echo "📅 실행 시간: $(date)"
+        echo "✅ 상태: ${{ job.status }}"
