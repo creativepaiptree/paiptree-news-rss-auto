@@ -43,12 +43,12 @@ def get_config():
         print(f"❌ 설정 읽기 실패: {e}")
         sys.exit(1)
 
-# RSS 피드 목록 - Google News 검색 (키워드별)
+# RSS 피드 목록 - 네이버 뉴스 검색 (키워드별)
 RSS_FEEDS = [
-    "https://news.google.com/rss/search?q=파이프트리&hl=ko&gl=KR&ceid=KR:ko",
-    "https://news.google.com/rss/search?q=파머스마인드&hl=ko&gl=KR&ceid=KR:ko", 
-    "https://news.google.com/rss/search?q=paiptree&hl=ko&gl=KR&ceid=KR:ko",
-    "https://news.google.com/rss/search?q=farmersmind&hl=ko&gl=KR&ceid=KR:ko"
+    "http://newssearch.naver.com/search.naver?where=rss&query=파이프트리",
+    "http://newssearch.naver.com/search.naver?where=rss&query=파머스마인드", 
+    "http://newssearch.naver.com/search.naver?where=rss&query=paiptree",
+    "http://newssearch.naver.com/search.naver?where=rss&query=farmersmind"
 ]
 
 # 검색 키워드 (이미 RSS에서 필터링되므로 전체 매칭)
@@ -193,9 +193,6 @@ def fetch_rss_news(rss_url, keywords, initial_mode=False):
 def generate_sequential_id(worksheet):
     """기존 데이터 확인해서 다음 번호 생성 (001, 002, 003...)"""
     try:
-        # API 호출 제한 고려하여 대기
-        time.sleep(1.0)
-        
         all_records = worksheet.get_all_records()
         if not all_records:
             return "001"
@@ -223,9 +220,6 @@ def generate_sequential_id(worksheet):
 def is_duplicate_news(worksheet, original_url):
     """중복 뉴스 확인 (URL 기반)"""
     try:
-        # API 호출 제한 고려하여 대기
-        time.sleep(1.0)
-        
         # 모든 기존 데이터 가져오기
         all_records = worksheet.get_all_records()
         
@@ -279,9 +273,6 @@ def add_news_to_sheet(worksheet, news_item):
         
         worksheet.append_row(row_data)
         print(f"✅ 뉴스 추가 (ID: {news_id}): {news_item['title'][:50]}...")
-        
-        # API 호출 제한 고려하여 추가 대기
-        time.sleep(1.5)
         return True
         
     except Exception as e:
@@ -327,12 +318,14 @@ def main():
     all_news_items.sort(key=lambda x: x.get('pub_datetime', datetime.now()))
     
     print(f"\n📊 총 {len(all_news_items)}개 뉴스를 시간순으로 정렬하여 추가 중...")
-    print("⏰ API 호출 제한 고려하여 안전한 속도로 처리합니다...")
     
     # 시트에 추가
     for news_item in all_news_items:
         if add_news_to_sheet(worksheet, news_item):
             total_collected += 1
+        
+        # API 호출 제한 고려하여 잠시 대기
+        time.sleep(0.5)
     
     # 실행 결과
     end_time = time.time()

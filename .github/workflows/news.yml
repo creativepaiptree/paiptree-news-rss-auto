@@ -1,0 +1,40 @@
+name: Paiptree News Collector
+
+on:
+  schedule:
+    # 매일 오전 8시 (KST) = UTC 23시에 실행
+    - cron: '0 23 * * *'
+  
+  # 수동 실행 가능
+  workflow_dispatch:
+
+jobs:
+  collect-news:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 저장소 체크아웃
+      uses: actions/checkout@v4
+    
+    - name: Python 설정
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: 의존성 설치
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: 뉴스 수집 실행
+      env:
+        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+      run: |
+        python rss_scraper.py
+    
+    - name: 실행 결과 알림
+      if: always()
+      run: |
+        echo "🎉 Paiptree 뉴스 수집 완료!"
+        echo "📅 실행 시간: $(date)"
