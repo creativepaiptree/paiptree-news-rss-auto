@@ -17,6 +17,11 @@ from html import unescape
 import dateutil.parser
 from difflib import SequenceMatcher
 
+# 새로운 이미지 처리 모듈들 import
+from web_scraper import ArticleImageScraper
+from image_processor import ImageProcessor
+from google_drive_uploader import GoogleDriveUploader
+
 # 환경변수에서 설정 읽기
 def get_config():
     """환경변수에서 설정 정보 읽기"""
@@ -99,6 +104,47 @@ def setup_google_sheets(creds_dict, sheets_id):
     except Exception as e:
         print(f"❌ Google Sheets 연결 실패: {e}")
         sys.exit(1)
+
+def process_article_image(article_url, credentials_dict):
+    """기사 이미지 처리 파이프라인"""
+    try:
+        print(f"🖼️ 이미지 처리 파이프라인 시작: {article_url}")
+        
+        # 1. 웹 스크래핑으로 이미지 URL 추출
+        scraper = ArticleImageScraper()
+        image_url = scraper.extract_first_image(article_url)
+        
+        if not image_url:
+            print(f"⚠️ 이미지를 찾을 수 없음: {article_url}")
+            return None
+        
+        # 2. 이미지 다운로드 및 최적화
+        processor = ImageProcessor()
+        processed_image = processor.download_and_optimize(image_url)
+        
+        if not processed_image:
+            print(f"❌ 이미지 처리 실패: {image_url}")
+            return None
+        
+        # 3. Google Drive 업로드
+        uploader = GoogleDriveUploader(credentials_dict)
+        uploader.setup_news_images_folder()
+        
+        public_url = uploader.upload_image(
+            processed_image['data'],
+            processed_image['filename']
+        )
+        
+        if public_url:
+            print(f"✅ 이미지 처리 파이프라인 완료: {public_url}")
+            return public_url
+        else:
+            print(f"❌ Google Drive 업로드 실패")
+            return None
+            
+    except Exception as e:
+        print(f"❌ 이미지 처리 파이프라인 실패: {e}")
+        return None
 
 def extract_domain_name(url):
     """URL에서 도메인명 추출"""
@@ -279,7 +325,7 @@ def deduplicate_news_comprehensive(all_news_items):
     print(f"📊 중복 제거 완료: {len(unique_news)}개 남음 ({len(all_news_items) - len(unique_news)}개 제거)")
     return unique_news
 
-def fetch_rss_news(rss_url, keywords, initial_mode=False):
+def fetch_rss_news(rss_url, keywords, credentials_dict, initial_mode=False):
     """RSS 피드에서 뉴스 가져오기"""
     news_items = []
     
@@ -343,6 +389,8 @@ def fetch_rss_news(rss_url, keywords, initial_mode=False):
                 
                 # 썸네일 이미지 추출 시도
                 thumbnail_url = ""
+                
+                # 1. RSS 피드에서 기본 이미지 확인
                 if hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
                     thumbnail_url = entry.media_thumbnail[0].get('url', '')
                 elif hasattr(entry, 'enclosures') and entry.enclosures:
@@ -351,9 +399,24 @@ def fetch_rss_news(rss_url, keywords, initial_mode=False):
                             thumbnail_url = enc.href
                             break
                 
-                # 썸네일이 없으면 기본 이미지
+                # 2. RSS 이미지가 없으면 기사에서 이미지 추출 시도
+                if not thumbnail_url and link:
+                    print(f"🔍 기사 이미지 추출 시도: {link}")
+                    try:
+                        # 이미지 처리 파이프라인 실행
+                        processed_image_url = process_article_image(link, credentials_dict)
+                        if processed_image_url:
+                            thumbnail_url = processed_image_url
+                            print(f"✅ 기사 이미지 처리 성공: {thumbnail_url}")
+                        else:
+                            print(f"⚠️ 기사 이미지 처리 실패, 기본 이미지 사용")
+                    except Exception as e:
+                        print(f"❌ 이미지 처리 중 오류: {e}")
+                
+                # 3. 모든 시도가 실패하면 기본 이미지
                 if not thumbnail_url:
                     thumbnail_url = "https://via.placeholder.com/300x200/00B0EB/FFFFFF?text=Paiptree+News"
+                    print(f"📷 기본 이미지 사용")
                 
                 news_item = {
                     'title': clean_title[:200] if clean_title else "제목 없음",  # 출처 제거된 깔끔한 제목
@@ -446,7 +509,7 @@ def main():
     
     # 모든 RSS에서 뉴스 수집
     for rss_url in RSS_FEEDS:
-        news_items = fetch_rss_news(rss_url, KEYWORDS, initial_mode)
+        news_items = fetch_rss_news(rss_url, KEYWORDS, creds_dict, initial_mode)
         total_found += len(news_items)
         all_news_items.extend(news_items)
     
