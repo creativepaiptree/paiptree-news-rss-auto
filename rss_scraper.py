@@ -15,6 +15,7 @@ import re
 from urllib.parse import urlparse
 from html import unescape
 import dateutil.parser
+from difflib import SequenceMatcher
 
 # 환경변수에서 설정 읽기
 def get_config():
@@ -109,6 +110,39 @@ def extract_domain_name(url):
     except:
         return "Unknown"
 
+def extract_source_from_title(title):
+    """제목 끝에서 출처 추출 (- 뒤의 내용)"""
+    if ' - ' in title:
+        parts = title.rsplit(' - ', 1)  # 마지막 '-' 기준으로 분리
+        if len(parts) == 2:
+            clean_title = parts[0].strip()
+            source = parts[1].strip()
+            return clean_title, source
+    
+    return title, "Unknown"
+
+def clean_source_name(source):
+    """출처명 정리 (불필요한 단어 제거)"""
+    if not source or source == "Unknown":
+        return source
+    
+    # 자주 나오는 불필요한 단어들 제거
+    cleaners = [
+        r'\s*뉴스$', r'\s*신문$', r'\s*일보$', 
+        r'^\s*', r'\s*$',  # 앞뒤 공백
+        r'\.{2,}$'  # 끝의 점들 제거
+    ]
+    
+    clean_source = source
+    for cleaner in cleaners:
+        clean_source = re.sub(cleaner, '', clean_source)
+    
+    # 너무 짧거나 비어있으면 원본 사용
+    if len(clean_source.strip()) < 2:
+        return source
+    
+    return clean_source.strip()
+
 def extract_publish_date(entry):
     """RSS에서 정확한 발행일 추출"""
     # 우선순위: published_parsed > published > updated_parsed > updated
@@ -174,6 +208,49 @@ def categorize_news(title, description, source):
     
     return '기타뉴스'
 
+def calculate_similarity(title1, title2):
+    """두 제목의 유사도 계산 (0~1)"""
+    # 공백과 특수문자 제거 후 비교
+    clean_title1 = re.sub(r'[^\w]', '', title1, flags=re.UNICODE)
+    clean_title2 = re.sub(r'[^\w]', '', title2, flags=re.UNICODE)
+    
+    return SequenceMatcher(None, clean_title1, clean_title2).ratio()
+
+def deduplicate_news_comprehensive(all_news_items):
+    """제목 유사도 + URL 기반 종합 중복 제거"""
+    unique_news = []
+    seen_titles = []
+    seen_urls = set()
+    
+    print(f"🔍 중복 제거 시작: {len(all_news_items)}개 뉴스 처리 중...")
+    
+    for news in all_news_items:
+        title = news['title'].lower().strip()
+        clean_url = news['original_url'].split('?')[0]  # URL 파라미터 제거
+        
+        # URL 중복 체크
+        if clean_url in seen_urls:
+            print(f"🔄 중복 URL 제거: {title[:50]}...")
+            continue
+        
+        # 제목 유사도 체크 (85% 이상 유사하면 중복으로 판단)
+        is_similar = False
+        for seen_title in seen_titles:
+            similarity = calculate_similarity(title, seen_title)
+            if similarity > 0.85:
+                print(f"🔄 유사 제목 제거: {title[:50]}... (유사도: {similarity:.2f})")
+                is_similar = True
+                break
+        
+        if not is_similar:
+            seen_titles.append(title)
+            seen_urls.add(clean_url)
+            unique_news.append(news)
+            print(f"✅ 고유 뉴스 추가: {title[:50]}...")
+    
+    print(f"📊 중복 제거 완료: {len(unique_news)}개 남음 ({len(all_news_items) - len(unique_news)}개 제거)")
+    return unique_news
+
 def fetch_rss_news(rss_url, keywords, initial_mode=False):
     """RSS 피드에서 뉴스 가져오기"""
     news_items = []
@@ -208,12 +285,20 @@ def fetch_rss_news(rss_url, keywords, initial_mode=False):
         
         # 각 뉴스 아이템 확인
         for entry in entries_to_process:
-            title = entry.get('title', '')
+            original_title = entry.get('title', '')
             raw_description = entry.get('description', '') or entry.get('summary', '')
             link = entry.get('link', '')
             
-            # 키워드 매칭 확인
-            content_to_check = f"{title} {raw_description}".lower()
+            # 🔥 제목에서 출처 추출
+            clean_title, source = extract_source_from_title(original_title)
+            source = clean_source_name(source)
+            
+            # URL에서 도메인 추출 (출처 없을 경우 대안)
+            if source == "Unknown":
+                source = extract_domain_name(link)
+            
+            # 키워드 매칭 확인 (깔끔한 제목으로)
+            content_to_check = f"{clean_title} {raw_description}".lower()
             matched_keywords = [kw for kw in keywords if kw.lower() in content_to_check]
             
             if matched_keywords:
@@ -221,16 +306,8 @@ def fetch_rss_news(rss_url, keywords, initial_mode=False):
                 pub_datetime = extract_publish_date(entry)
                 pub_date = pub_datetime.strftime('%Y-%m-%d')
                 
-                # 언론사명 추출
-                source = feed.feed.get('title', '')
-                if not source or source == 'Unknown':
-                    source = extract_domain_name(link)
-                
                 # HTML 태그 제거한 깔끔한 설명
                 clean_desc = clean_description(raw_description)
-                
-                # 카테고리 자동 분류
-                category = categorize_news(title, clean_desc, source)
                 
                 # 썸네일 이미지 추출 시도
                 thumbnail_url = ""
@@ -247,9 +324,9 @@ def fetch_rss_news(rss_url, keywords, initial_mode=False):
                     thumbnail_url = "https://via.placeholder.com/300x200/00B0EB/FFFFFF?text=Paiptree+News"
                 
                 news_item = {
-                    'title': title[:200] if title else "제목 없음",
+                    'title': clean_title[:200] if clean_title else "제목 없음",  # 출처 제거된 깔끔한 제목
                     'description': clean_desc,
-                    'category': category,  # 자동 분류된 카테고리
+                    'category': source,  # 실제 언론사명 (매일경제, 머니투데이 등)
                     'tags': ','.join(matched_keywords),
                     'upload_date': pub_date,  # 실제 뉴스 발행일
                     'pub_datetime': pub_datetime,  # 정렬용
@@ -259,7 +336,7 @@ def fetch_rss_news(rss_url, keywords, initial_mode=False):
                 }
                 
                 news_items.append(news_item)
-                print(f"✅ 키워드 매칭: {title[:50]}... (카테고리: {category}) [{pub_date}]")
+                print(f"✅ 키워드 매칭: {clean_title[:50]}... (출처: {source}) [{pub_date}]")
         
         print(f"📊 {rss_url}에서 {len(news_items)}개 매칭 뉴스 발견")
         return news_items
@@ -282,9 +359,9 @@ def add_news_to_sheet(worksheet, news_item):
         # 9개 컬럼에 맞춘 데이터 생성
         row_data = [
             news_id,                        # A: id
-            news_item['title'],             # B: title
+            news_item['title'],             # B: title (출처 제거된 깔끔한 제목)
             news_item['description'],       # C: description (HTML 태그 제거됨)
-            news_item['category'],          # D: category (자동 분류됨)
+            news_item['category'],          # D: category (실제 언론사명)
             news_item['tags'],              # E: tags
             news_item['upload_date'],       # F: upload_date (실제 뉴스 날짜)
             news_item['download_count'],    # G: download_count
@@ -305,7 +382,7 @@ def add_news_to_sheet(worksheet, news_item):
 
 def main():
     """메인 실행 함수"""
-    print("🚀 Paiptree 뉴스 수집 시작 (개선 버전)")
+    print("🚀 Paiptree 뉴스 수집 시작 (출처 추출 버전)")
     print(f"📅 실행 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     # 초기 수집 모드 확인 (환경변수)
@@ -317,7 +394,7 @@ def main():
     else:
         print("📅 일반 모드: 최근 7일 이내 뉴스만 수집")
     
-    print("🔧 개선사항: 정확한 날짜, HTML 제거, 자동 카테고리 분류")
+    print("🔧 개선사항: 정확한 날짜, HTML 제거, 실제 출처 카테고리, 중복 제거")
     
     start_time = time.time()
     
@@ -334,22 +411,30 @@ def main():
     
     print(f"🔍 {len(RSS_FEEDS)}개 RSS 피드에서 뉴스 검색 중...")
     print(f"🏷️ 검색 키워드: {', '.join(KEYWORDS)}")
-    print("🐌 안전한 속도로 처리합니다 (중복 체크 없음, 3초 대기)")
     
+    # 모든 RSS에서 뉴스 수집
     for rss_url in RSS_FEEDS:
         news_items = fetch_rss_news(rss_url, KEYWORDS, initial_mode)
         total_found += len(news_items)
         all_news_items.extend(news_items)
     
-    # 발행일자 기준으로 정렬 (오래된 것부터)
-    all_news_items.sort(key=lambda x: x.get('pub_datetime', datetime.now()))
+    print(f"\n📊 수집 전 총 뉴스: {len(all_news_items)}개")
     
-    print(f"\n📊 총 {len(all_news_items)}개 뉴스를 시간순으로 추가 중...")
+    # 🔥 중복 제거 처리
+    unique_news = deduplicate_news_comprehensive(all_news_items)
+    
+    print(f"✅ 중복 제거 후: {len(unique_news)}개")
+    print(f"🗑️ 제거된 중복: {len(all_news_items) - len(unique_news)}개")
+    
+    # 발행일자 기준으로 정렬 (오래된 것부터)
+    unique_news.sort(key=lambda x: x.get('pub_datetime', datetime.now()))
+    
+    print(f"\n📊 총 {len(unique_news)}개 고유 뉴스를 시간순으로 추가 중...")
     print("⏰ 각 뉴스마다 3초씩 대기하여 안전하게 처리합니다...")
     
-    # 시트에 추가 (중복 체크 없음)
-    for i, news_item in enumerate(all_news_items, 1):
-        print(f"📝 진행률: {i}/{len(all_news_items)}")
+    # 시트에 추가
+    for i, news_item in enumerate(unique_news, 1):
+        print(f"📝 진행률: {i}/{len(unique_news)}")
         if add_news_to_sheet(worksheet, news_item):
             total_collected += 1
     
@@ -360,15 +445,16 @@ def main():
     print(f"\n🎉 뉴스 수집 완료!")
     print(f"🎯 수집 모드: {'초기 대량 수집' if initial_mode else '일반 수집'}")
     print(f"📊 총 발견: {total_found}개")
-    print(f"✅ 성공 추가: {total_collected}개")
+    print(f"🔄 중복 제거: {len(all_news_items) - len(unique_news)}개")
+    print(f"✅ 고유 뉴스 추가: {total_collected}개")
     print(f"⏱️ 실행 시간: {execution_time}초")
-    print(f"🔧 개선된 기능: 정확한 날짜, 깔끔한 설명, 자동 카테고리")
+    print(f"🔧 개선된 기능: 정확한 날짜, 깔끔한 설명, 실제 언론사 카테고리, 스마트 중복 제거")
     
     if total_collected == 0:
         print("ℹ️ 새로운 뉴스가 없습니다.")
     else:
-        print(f"🌟 {total_collected}개의 뉴스가 추가되었습니다!")
-        print("💡 중복은 수동으로 정리해주세요.")
+        print(f"🌟 {total_collected}개의 고유한 뉴스가 추가되었습니다!")
+        print("📰 카테고리: 실제 언론사명 (매일경제, 머니투데이 등)")
 
 if __name__ == "__main__":
     main()
