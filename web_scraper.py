@@ -10,6 +10,7 @@ from urllib.parse import urljoin, urlparse
 import logging
 from PIL import Image
 from io import BytesIO
+import base64
 
 class ArticleImageScraper:
     def __init__(self, timeout=10, max_retries=3):
@@ -20,7 +21,7 @@ class ArticleImageScraper:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         })
     
-    def extract_largest_image(self, article_url):
+    def extract_largest_image(self, article_url, max_size=(400, 300), return_optimized=True):
         """🔥 기사에서 가장 큰 이미지 추출 - 실제 크기 측정"""
         try:
             print(f"🔍 이미지 추출 시작: {article_url}")
@@ -102,7 +103,18 @@ class ArticleImageScraper:
                 largest_image = max(image_sizes, key=lambda x: x['area'])
                 print(f"🏆 가장 큰 이미지 선택: {largest_image['width']}x{largest_image['height']} (면적: {largest_image['area']:,}px²)")
                 print(f"🎯 선택된 URL: {largest_image['url']}")
-                return largest_image['url']
+                
+                # 🔥 이미지 최적화 옵션
+                if return_optimized:
+                    optimized_image = self._optimize_image(largest_image['url'], max_size)
+                    if optimized_image:
+                        print(f"✅ 이미지 최적화 완료: {max_size[0]}x{max_size[1]} 최대 크기")
+                        return optimized_image
+                    else:
+                        print(f"⚠️ 최적화 실패, 원본 URL 반환")
+                        return largest_image['url']
+                else:
+                    return largest_image['url']
             else:
                 print(f"❌ 유효한 크기의 이미지를 찾을 수 없음: {article_url}")
                 return None
@@ -278,3 +290,82 @@ class ArticleImageScraper:
                         return True
         
         return False
+    
+    def _optimize_image(self, image_url, max_size=(400, 300), quality=85):
+        """🔥 이미지 다운로드 후 리사이징 및 압축"""
+        try:
+            print(f"📏 이미지 최적화 시작: {image_url[:60]}...")
+            
+            # 이미지 다운로드
+            response = self.session.get(image_url, timeout=self.timeout)
+            if response.status_code != 200:
+                print(f"❌ 이미지 다운로드 실패: HTTP {response.status_code}")
+                return None
+            
+            # 이미지 열기
+            original_image = Image.open(BytesIO(response.content))
+            original_size = original_image.size
+            original_format = original_image.format or 'JPEG'
+            
+            print(f"🖼️ 원본 이미지: {original_size[0]}x{original_size[1]} ({original_format})")
+            
+            # RGB 로 변환 (JPEG 저장을 위해)
+            if original_image.mode in ('RGBA', 'LA', 'P'):
+                # 투명 배경을 흰색으로 처리
+                background = Image.new('RGB', original_image.size, (255, 255, 255))
+                if original_image.mode == 'P':
+                    original_image = original_image.convert('RGBA')
+                background.paste(original_image, mask=original_image.split()[-1] if original_image.mode == 'RGBA' else None)
+                original_image = background
+            elif original_image.mode != 'RGB':
+                original_image = original_image.convert('RGB')
+            
+            # 리사이징 (비율 유지)
+            original_image.thumbnail(max_size, Image.Resampling.LANCZOS)
+            new_size = original_image.size
+            
+            print(f"📐 리사이징 결과: {new_size[0]}x{new_size[1]}")
+            
+            # 압축된 이미지를 메모리에 저장
+            output_buffer = BytesIO()
+            original_image.save(output_buffer, format='JPEG', quality=quality, optimize=True)
+            compressed_data = output_buffer.getvalue()
+            
+            # 크기 비교
+            original_size_kb = len(response.content) / 1024
+            compressed_size_kb = len(compressed_data) / 1024
+            compression_ratio = (1 - compressed_size_kb / original_size_kb) * 100
+            
+            print(f"📁 원본 크기: {original_size_kb:.1f}KB")
+            print(f"📁 압축 크기: {compressed_size_kb:.1f}KB")
+            print(f"📊 압축률: {compression_ratio:.1f}% 감소")
+            
+            # Base64 인코딩으로 data URL 생성
+            base64_data = base64.b64encode(compressed_data).decode('utf-8')
+            data_url = f"data:image/jpeg;base64,{base64_data}"
+            
+            print(f"✅ 이미지 최적화 완료!")
+            return data_url
+            
+        except Exception as e:
+            print(f"❌ 이미지 최적화 실패: {e}")
+            return None
+    
+    def _optimize_image_external(self, image_url, max_size=(400, 300)):
+        """🔥 대안: 외부 이미지 리사이징 서비스 사용"""
+        try:
+            # 예시: Cloudinary, ImageKit 등의 URL 변환 서비스
+            # 예: https://res.cloudinary.com/demo/image/fetch/w_400,h_300,c_fill/https://original-image-url.jpg
+            
+            # 간단한 방법: URL 파라미터 추가 (일부 서비스 지원)
+            if '?' in image_url:
+                optimized_url = f"{image_url}&w={max_size[0]}&h={max_size[1]}&q=85"
+            else:
+                optimized_url = f"{image_url}?w={max_size[0]}&h={max_size[1]}&q=85"
+            
+            print(f"🔗 외부 리사이징 URL: {optimized_url}")
+            return optimized_url
+            
+        except Exception as e:
+            print(f"❌ 외부 리사이징 실패: {e}")
+            return image_url  # 원본 URL 반환

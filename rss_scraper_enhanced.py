@@ -11,6 +11,7 @@ import hashlib
 import requests
 from datetime import datetime, timedelta
 import sys
+from web_scraper import ArticleImageScraper
 
 # 환경변수에서 설정 읽기
 def get_config():
@@ -98,7 +99,7 @@ def setup_google_sheets(creds_dict, sheets_id):
         print(f"❌ Google Sheets 연결 실패: {e}")
         sys.exit(1)
 
-def fetch_rss_news(rss_url, keywords, initial_mode=False):
+def fetch_rss_news(rss_url, keywords, image_scraper, initial_mode=False):
     """RSS 피드에서 뉴스 가져오기"""
     news_items = []
     
@@ -158,8 +159,10 @@ def fetch_rss_news(rss_url, keywords, initial_mode=False):
                 # 언론사명 추출
                 source = feed.feed.get('title', 'Unknown')
                 
-                # 썸네일 이미지 추출 시도
+                # 🔥 썸네일 이미지 추출 시도 (RSS → 원본 기사 → 기본 이미지)
                 thumbnail_url = ""
+                
+                # 1. RSS에서 제공하는 이미지 우선 시도
                 if hasattr(entry, 'media_thumbnail'):
                     thumbnail_url = entry.media_thumbnail[0]['url'] if entry.media_thumbnail else ""
                 elif hasattr(entry, 'enclosures') and entry.enclosures:
@@ -167,6 +170,32 @@ def fetch_rss_news(rss_url, keywords, initial_mode=False):
                         if enc.type.startswith('image/'):
                             thumbnail_url = enc.href
                             break
+                
+                # 2. RSS 이미지가 없으면 원본 기사에서 추출 🔥
+                if not thumbnail_url and link:
+                    try:
+                        print(f"🖼️ 원본 기사 이미지 추출 시도: {link}")
+                        # 🔥 최적화된 이미지 추출 (400x300 최대 크기)
+                        extracted_image = image_scraper.extract_largest_image(
+                            link, 
+                            max_size=(400, 300),  # 썸네일용 최적 크기
+                            return_optimized=True  # 압축 및 리사이징 활성화
+                        )
+                        if extracted_image:
+                            thumbnail_url = extracted_image
+                            print(f"✅ 최적화된 이미지 추출 성공!")
+                            if extracted_image.startswith('data:image/'):
+                                print(f"📁 Base64 인코딩된 이미지 ({len(extracted_image)} 문자)")
+                            else:
+                                print(f"🔗 원본 URL: {extracted_image}")
+                        else:
+                            print(f"❌ 원본 기사 이미지 추출 실패: {link}")
+                    except Exception as e:
+                        print(f"⚠️ 이미지 추출 예외: {e}")
+                
+                # 3. 여전히 없으면 키워드별 기본 이미지
+                if not thumbnail_url:
+                    thumbnail_url = get_default_image_by_keywords(matched_keywords)
                 
                 news_item = {
                     'title': title[:200],  # 제목 길이 제한
@@ -232,6 +261,24 @@ def is_duplicate_news(worksheet, original_url):
     except Exception as e:
         print(f"⚠️ 중복 확인 실패: {e}")
         return False
+
+def get_default_image_by_keywords(matched_keywords):
+    """키워드별 기본 이미지 URL 반환"""
+    # 키워드별 고품질 기본 이미지 매핑
+    default_images = {
+        'paiptree': 'https://example.com/paiptree-logo.jpg',
+        'farmersmind': 'https://example.com/farmersmind-logo.jpg',
+        '파이프트리': 'https://example.com/paiptree-kr.jpg',
+        '파머스마인드': 'https://example.com/farmersmind-kr.jpg'
+    }
+    
+    # 매칭된 키워드 중 첫 번째로 기본 이미지 선택
+    for keyword in matched_keywords:
+        if keyword.lower() in default_images:
+            return default_images[keyword.lower()]
+    
+    # 매칭되는 기본 이미지가 없으면 빈 문자열
+    return ""
 
 def add_news_to_sheet(worksheet, news_item):
     """Google Sheets에 뉴스 추가"""
@@ -309,8 +356,12 @@ def main():
     print(f"🔍 {len(RSS_FEEDS)}개 RSS 피드에서 뉴스 검색 중...")
     print(f"🏷️ 검색 키워드: {', '.join(KEYWORDS)}")
     
+    # 🔥 이미지 스크래퍼 초기화
+    print("🖼️ 이미지 스크래퍼 초기화 중...")
+    image_scraper = ArticleImageScraper(timeout=10, max_retries=2)
+    
     for rss_url in RSS_FEEDS:
-        news_items = fetch_rss_news(rss_url, KEYWORDS, initial_mode)
+        news_items = fetch_rss_news(rss_url, KEYWORDS, image_scraper, initial_mode)
         total_found += len(news_items)
         all_news_items.extend(news_items)
     
