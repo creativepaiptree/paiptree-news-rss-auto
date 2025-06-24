@@ -1,0 +1,24 @@
+  - name: Checkout code
+    uses: actions/checkout@v4
+
+  - name: Check files
+    run: |
+      echo "📁 프로젝트 파일 확인:"
+      ls -la
+      echo "📄 Python 파일 확인:"
+      ls -la *.py
+      echo "📋 requirements.txt 확인:"
+      cat requirements.txt
+
+  - name: Set up Python
+    uses: actions/setup-python@v4
+    with:
+      python-version: '3.11'
+
+  - name: Install Python dependencies
+    run: |
+      python -m pip install --upgrade pip
+      pip install -r requirements.txt
+      echo "✅ Python dependencies installed successfully"
+      echo "📦 설치된 패키지 확인:"
+      pip list | grep -E "(beautifulsoup4|Pillow|google-api-python-client)" 

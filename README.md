@@ -71,6 +71,136 @@ GitHub Actions → 해당 워크플로우 → 실행 로그에서 수집 결과�
 - **일일 수집량**: 키워드 매칭에 따라 0-10개
 - **성공률**: 95% 이상
 
+## 🆕 최신 기능: 고급 이미지 처리 시스템
+
+### 이미지 처리 파이프라인
+- **웹 스크래핑**: 기사에서 첫 번째 의미있는 이미지 추출
+- **이미지 최적화**: 다운로드, 리사이징, 압축 처리
+- **Google Drive 업로드**: 최적화된 이미지를 Google Drive에 업로드
+- **공개 링크 생성**: 웹에서 접근 가능한 공개 URL 생성
+
+### 이미지 추출 우선순위
+1. **og:image 메타 태그** (가장 우선)
+2. **기사 내 첫 번째 이미지** (100x100 이상)
+3. **기타 이미지** (fallback)
+
+### 이미지 최적화 설정
+- **최대 크기**: 400x300 픽셀
+- **품질**: 85% JPEG
+- **포맷**: JPEG (알파 채널 자동 변환)
+
+## 주요 기능
+
+### 📰 뉴스 수집
+- Google News RSS 피드 모니터링
+- 파이프트리 관련 키워드 자동 필터링
+- 중복 제거 및 유사도 검사
+- 정확한 발행일자 추출
+
+### 🏷️ 태그 시스템
+- 제목과 본문에서 교차 키워드 추출
+- 우선순위 키워드 시스템
+- 의미있는 태그 자동 생성
+
+### 📊 데이터 관리
+- Google Sheets 자동 업데이트
+- 9개 컬럼 구조 (id, title, description, category, tags, upload_date, download_count, thumbnail_url, original_url)
+- API 호출 제한 고려한 안전한 처리
+
+## 설치 및 설정
+
+### 1. 의존성 설치
+```bash
+pip install -r requirements.txt
+```
+
+### 2. 환경변수 설정
+```bash
+export GOOGLE_CREDENTIALS='{"type": "service_account", ...}'
+export GOOGLE_SHEETS_ID='your-sheets-id'
+export INITIAL_COLLECTION='false'  # true: 초기 대량 수집, false: 최근 7일
+```
+
+### 3. Google Service Account 설정
+- Google Cloud Console에서 서비스 계정 생성
+- Google Sheets API 및 Google Drive API 활성화
+- 서비스 계정 키 JSON 다운로드
+- 환경변수에 JSON 내용 설정
+
+## 사용법
+
+### 일반 실행
+```bash
+python rss_scraper.py
+```
+
+### 초기 대량 수집
+```bash
+export INITIAL_COLLECTION='true'
+python rss_scraper.py
+```
+
+### 이미지 처리 파이프라인 테스트
+```bash
+python test_image_pipeline.py
+```
+
+## GitHub Actions 자동화
+
+### 스케줄링
+- **일반 모드**: 매일 오전 9시 실행 (최근 7일 뉴스)
+- **초기 모드**: 수동 트리거 (모든 과거 뉴스)
+
+### 워크플로우 파일
+- `.github/workflows/rss-scraper.yml`
+
+## 데이터 구조
+
+### Google Sheets 컬럼
+| 컬럼 | 설명 | 예시 |
+|------|------|------|
+| A | id | 고유 ID |
+| B | title | 뉴스 제목 |
+| C | description | 뉴스 설명 |
+| D | category | 언론사명 |
+| E | tags | 키워드 태그 |
+| F | upload_date | 발행일자 |
+| G | download_count | 다운로드 수 |
+| H | thumbnail_url | 썸네일 이미지 URL |
+| I | original_url | 원문 링크 |
+
+## 개선사항
+
+### 최신 업데이트
+- ✅ 정확한 발행일자 추출
+- ✅ HTML 태그 제거
+- ✅ 실제 언론사명 카테고리
+- ✅ 제목+본문 교차 키워드 태그
+- ✅ 종합적 중복 제거
+- ✅ 고급 이미지 처리 시스템
+
+### 이미지 처리 개선
+- ✅ 웹 스크래핑으로 기사 이미지 추출
+- ✅ 이미지 최적화 및 압축
+- ✅ Google Drive 자동 업로드
+- ✅ 공개 접근 가능한 URL 생성
+
+## 문제 해결
+
+### 일반적인 문제
+1. **Google API 할당량 초과**: 실행 간격 조정
+2. **네트워크 오류**: 재시도 로직으로 자동 처리
+3. **이미지 처리 실패**: 기본 이미지로 fallback
+
+### 로그 확인
+- 상세한 진행 상황 로그 출력
+- 각 단계별 성공/실패 표시
+- 오류 발생 시 구체적인 원인 표시
+
+## 라이선스
+
+이 프로젝트는 파이프트리 내부 사용을 위한 프로젝트입니다.
+
 ---
 
 **Made for Paiptree Design System** 🎨
