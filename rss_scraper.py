@@ -187,26 +187,54 @@ def clean_description(raw_description):
     
     return clean_text[:500]
 
-def categorize_news(title, description, source):
-    """키워드 기반 카테고리 자동 분류"""
-    content = f"{title} {description}".lower()
+def extract_common_keywords(title, description):
+    """제목과 설명에서 공통으로 나오는 단어 3개 추출"""
+    if not title or not description:
+        return []
     
-    # 카테고리 키워드 매핑
-    categories = {
-        '경제/투자': ['투자', '펀딩', '투자금', '시리즈', '기업공개', '상장', '매출', '수익', '자금조달', '그린랩스'],
-        '기술/AI': ['ai', '인공지능', '스마트팜', '플랫폼', '기술', '솔루션', '시스템', '파머스마인드', 'farmersmind'],
-        '사업확장': ['진출', '협력', '업무협약', '파트너십', '확장', '글로벌', 'cpf', '토자이', '한호운수'],
-        '농축산업': ['양계', '축산', '농가', '조류독감', '질병예찰', '생계물류', '육계시장', '관제시스템'],
-        '언론/인터뷰': ['인터뷰', '대표', '창업자', 'ceo', '스타트업', '공동대표'],
-        '행사/전시': ['afro', '전시', '컨퍼런스', '세미나', '발표', '소개'],
-        '연구개발': ['건국대', '연구', '개발', '공동연구', '대학', '학술'],
+    # 1. 텍스트 정제 및 단어 분리
+    title_clean = re.sub(r'[^\w\s]', ' ', title.lower())
+    desc_clean = re.sub(r'[^\w\s]', ' ', description.lower())
+    
+    # 2. 의미있는 단어만 추출 (2글자 이상 한글, 3글자 이상 영문)
+    title_words = set(re.findall(r'[가-힣]{2,}|[a-zA-Z]{3,}', title_clean))
+    desc_words = set(re.findall(r'[가-힣]{2,}|[a-zA-Z]{3,}', desc_clean))
+    
+    # 3. 교차되는 단어 찾기
+    common_words = title_words & desc_words
+    
+    # 4. 불용어 제거 (검색어 및 일반적인 단어들)
+    stop_words = {
+        '파이프트리', 'paiptree', '파머스마인드', 'farmersmind',  # 검색어는 제외
+        '회사', '기업', '서비스', '시스템', '플랫폼', 
+        '통해', '위해', '때문', '경우', '방법', '과정', '결과',
+        '뉴스', '기사', '내용', '링크', '확인', '원문', '발표',
+        '관련', '대한', '있는', '없는', '이번', '올해', '내년'
     }
     
-    for category, keywords in categories.items():
-        if any(keyword in content for keyword in keywords):
-            return category
+    filtered_words = [word for word in common_words if word not in stop_words and len(word) >= 2]
     
-    return '기타뉴스'
+    # 5. 파이프트리 관련 키워드에 우선순위 부여
+    priority_keywords = {
+        'ai', '인공지능', '스마트팜', '축산', '양계', '농가', 
+        '투자', '펀딩', '협력', '진출', '해외', '디지털',
+        '솔루션', '기술', '혁신', '스타트업', '그린랩스',
+        '조류독감', '질병예찰', '생계물류', '관제시스템',
+        '토자이', 'cpf', '한호운수', '건국대'
+    }
+    
+    # 6. 우선순위 단어를 앞으로 정렬
+    priority_words = [word for word in filtered_words if word.lower() in priority_keywords]
+    other_words = [word for word in filtered_words if word.lower() not in priority_keywords]
+    
+    # 7. 길이 순으로 정렬 (긴 단어가 더 구체적)
+    priority_words = sorted(priority_words, key=len, reverse=True)
+    other_words = sorted(other_words, key=len, reverse=True)
+    
+    # 8. 우선순위 + 일반 단어 조합으로 3개 선택
+    result = priority_words[:2] + other_words[:1]
+    
+    return result[:3]
 
 def calculate_similarity(title1, title2):
     """두 제목의 유사도 계산 (0~1)"""
@@ -309,6 +337,10 @@ def fetch_rss_news(rss_url, keywords, initial_mode=False):
                 # HTML 태그 제거한 깔끔한 설명
                 clean_desc = clean_description(raw_description)
                 
+                # 🔥 제목과 설명에서 교차 키워드 추출
+                common_keywords = extract_common_keywords(clean_title, clean_desc)
+                tags_string = ','.join(common_keywords) if common_keywords else ','.join(matched_keywords)
+                
                 # 썸네일 이미지 추출 시도
                 thumbnail_url = ""
                 if hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
@@ -327,7 +359,7 @@ def fetch_rss_news(rss_url, keywords, initial_mode=False):
                     'title': clean_title[:200] if clean_title else "제목 없음",  # 출처 제거된 깔끔한 제목
                     'description': clean_desc,
                     'category': source,  # 실제 언론사명 (매일경제, 머니투데이 등)
-                    'tags': ','.join(matched_keywords),
+                    'tags': tags_string,  # 제목+설명 교차 키워드
                     'upload_date': pub_date,  # 실제 뉴스 발행일
                     'pub_datetime': pub_datetime,  # 정렬용
                     'download_count': 0,
@@ -336,7 +368,7 @@ def fetch_rss_news(rss_url, keywords, initial_mode=False):
                 }
                 
                 news_items.append(news_item)
-                print(f"✅ 키워드 매칭: {clean_title[:50]}... (출처: {source}) [{pub_date}]")
+                print(f"✅ 키워드 매칭: {clean_title[:50]}... (태그: {tags_string}) [{pub_date}]")
         
         print(f"📊 {rss_url}에서 {len(news_items)}개 매칭 뉴스 발견")
         return news_items
@@ -362,7 +394,7 @@ def add_news_to_sheet(worksheet, news_item):
             news_item['title'],             # B: title (출처 제거된 깔끔한 제목)
             news_item['description'],       # C: description (HTML 태그 제거됨)
             news_item['category'],          # D: category (실제 언론사명)
-            news_item['tags'],              # E: tags
+            news_item['tags'],              # E: tags (제목+설명 교차 키워드)
             news_item['upload_date'],       # F: upload_date (실제 뉴스 날짜)
             news_item['download_count'],    # G: download_count
             news_item['thumbnail_url'],     # H: thumbnail_url
@@ -382,7 +414,7 @@ def add_news_to_sheet(worksheet, news_item):
 
 def main():
     """메인 실행 함수"""
-    print("🚀 Paiptree 뉴스 수집 시작 (출처 추출 버전)")
+    print("🚀 Paiptree 뉴스 수집 시작 (교차 키워드 태그 버전)")
     print(f"📅 실행 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     # 초기 수집 모드 확인 (환경변수)
@@ -394,7 +426,7 @@ def main():
     else:
         print("📅 일반 모드: 최근 7일 이내 뉴스만 수집")
     
-    print("🔧 개선사항: 정확한 날짜, HTML 제거, 실제 출처 카테고리, 중복 제거")
+    print("🔧 개선사항: 정확한 날짜, HTML 제거, 실제 출처 카테고리, 교차 키워드 태그, 중복 제거")
     
     start_time = time.time()
     
@@ -448,13 +480,13 @@ def main():
     print(f"🔄 중복 제거: {len(all_news_items) - len(unique_news)}개")
     print(f"✅ 고유 뉴스 추가: {total_collected}개")
     print(f"⏱️ 실행 시간: {execution_time}초")
-    print(f"🔧 개선된 기능: 정확한 날짜, 깔끔한 설명, 실제 언론사 카테고리, 스마트 중복 제거")
+    print(f"🔧 최신 기능: 제목+설명 교차 키워드 태그 시스템")
     
     if total_collected == 0:
         print("ℹ️ 새로운 뉴스가 없습니다.")
     else:
         print(f"🌟 {total_collected}개의 고유한 뉴스가 추가되었습니다!")
-        print("📰 카테고리: 실제 언론사명 (매일경제, 머니투데이 등)")
+        print("🏷️ 태그: 제목과 본문에 공통으로 나오는 핵심 키워드")
 
 if __name__ == "__main__":
     main()
