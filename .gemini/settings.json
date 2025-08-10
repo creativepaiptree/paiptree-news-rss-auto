@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/zoro/projects"]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@executeautomation/playwright-mcp-server"]
+    }
+  },
+  "autoApproveTools": ["read_file", "read_many_files", "search_text"],
+  "theme": "dark"
+}

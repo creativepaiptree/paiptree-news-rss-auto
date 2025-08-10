@@ -43,6 +43,7 @@ jobs:
         echo "✅ 환경변수 확인 완료"
     
     - name: 뉴스 수집 실행 (재시도 포함)
+      id: scrape
       env:
         GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
@@ -50,23 +51,42 @@ jobs:
         echo "🚀 Paiptree 뉴스 수집 시작"
         echo "📅 실행 시간: $(date)"
         
+        # 최종 실행 결과를 캡처하기 위해 파일로 출력
+        output_log="scrape_output.log"
+        
         for i in {1..3}; do
-          if python rss_scraper.py; then
+          if python rss_scraper.py | tee -a $output_log; then
             echo "✅ 수집 성공!"
-            break
+            # 성공 시 결과에서 새로 추가된 뉴스 개수 추출
+            result_line=$(grep "새로 추가" $output_log | tail -n 1)
+            echo "result_summary=$result_line" >> $GITHUB_OUTPUT
+            exit 0
           else
             echo "❌ 시도 $i 실패"
             if [[ $i -eq 3 ]]; then
               echo "💥 모든 재시도 실패"
+              echo "result_summary=모든 재시도 실패" >> $GITHUB_OUTPUT
               exit 1
             fi
             sleep 30
           fi
         done
-    
-    - name: 실행 결과 알림
+
+    - name: Discord 알림 전송
       if: always()
-      run: |
-        echo "🎉 Paiptree 뉴스 수집 완료!"
-        echo "📅 실행 시간: $(date)"
-        echo "✅ 상태: ${{ job.status }}"
+      uses: tsg-bot/discord-webhook-action@v2
+      with:
+        webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        title: "📰 뉴스 수집 결과: ${{ job.status }}"
+        color: "${{ job.status == 'success' && '28a745' || 'dc3545' }}"
+        description: |
+          **Paiptree 뉴스 자동 수집 작업이 완료되었습니다.**
+          
+          - **결과**: `${{ job.status == 'success' && '성공' || '실패' }}`
+          - **요약**: `${{ steps.scrape.outputs.result_summary || '실행 정보 없음' }}`
+          - **워크플로우**: `${{ github.workflow }}`
+          - **실행 ID**: `${{ github.run_id }}`
+          
+          [🔗 실행 로그 바로가기](https.github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+        footer: "Paiptree News Collector"
+        timestamp: true
