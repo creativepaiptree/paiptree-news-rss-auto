@@ -74,19 +74,22 @@ jobs:
 
     - name: Discord 알림 전송
       if: always()
-      uses: tsg-bot/discord-webhook-action@v2
+      uses: crazy-max/ghaction-discord@v4
       with:
         webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        title: "📰 뉴스 수집 결과: ${{ job.status }}"
-        color: "${{ job.status == 'success' && '28a745' || 'dc3545' }}"
-        description: |
-          **Paiptree 뉴스 자동 수집 작업이 완료되었습니다.**
-          
-          - **결과**: `${{ job.status == 'success' && '성공' || '실패' }}`
-          - **요약**: `${{ steps.scrape.outputs.result_summary || '실행 정보 없음' }}`
-          - **워크플로우**: `${{ github.workflow }}`
-          - **실행 ID**: `${{ github.run_id }}`
-          
-          [🔗 실행 로그 바로가기](https.github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
-        footer: "Paiptree News Collector"
-        timestamp: true
+        embeds: |
+          {
+            "title": "📰 뉴스 수집 결과: ${{ job.status }}",
+            "description": "**Paiptree 뉴스 자동 수집 작업이 완료되었습니다.**\n\n- **결과**: `${{ job.status == 'success' && '성공' || '실패' }}`\n- **요약**: `${{ steps.scrape.outputs.result_summary || '실행 정보 없음' }}`\n- **워크플로우**: `${{ github.workflow }}`\n\n[🔗 실행 로그 바로가기](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})",
+            "color": ${{ job.status == 'success' && '2664261' || '14502728' }},
+            "footer": {
+              "text": "Paiptree News Collector"
+            },
+            "timestamp": "${{ fromJson(steps.get-time.outputs.json).utc }}"
+          }
+    - name: Get current time
+      id: get-time
+      uses: josStorer/get-current-time@v2
+      with:
+        format: YYYY-MM-DDTHH:mm:ss.SSSZ
+        utcOffset: "+09:00"
