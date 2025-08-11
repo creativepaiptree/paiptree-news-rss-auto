@@ -74,22 +74,40 @@ jobs:
 
     - name: Discord 알림 전송
       if: always()
-      uses: crazy-max/ghaction-discord@v4
-      with:
-        webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        embeds: |
-          {
-            "title": "📰 뉴스 수집 결과: ${{ job.status }}",
-            "description": "**Paiptree 뉴스 자동 수집 작업이 완료되었습니다.**\n\n- **결과**: `${{ job.status == 'success' && '성공' || '실패' }}`\n- **요약**: `${{ steps.scrape.outputs.result_summary || '실행 정보 없음' }}`\n- **워크플로우**: `${{ github.workflow }}`\n\n[🔗 실행 로그 바로가기](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})",
-            "color": ${{ job.status == 'success' && '2664261' || '14502728' }},
+      env:
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      run: |
+        if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+          echo "⚠️ Discord 웹훅 URL이 설정되지 않았습니다. 알림을 건너뜁니다."
+          exit 0
+        fi
+        
+        STATUS="${{ job.status }}"
+        if [ "$STATUS" == "success" ]; then
+          COLOR=2664261  # 초록색
+          STATUS_MSG="성공"
+        else
+          COLOR=14502728 # 빨간색
+          STATUS_MSG="실패"
+        fi
+        
+        SUMMARY="${{ steps.scrape.outputs.result_summary || '실행 정보 없음' }}"
+        
+        # JSON 페이로드 생성
+        JSON_PAYLOAD=$(cat <<EOF
+        {
+          "embeds": [{
+            "title": "📰 뉴스 수집 결과: ${STATUS_MSG}",
+            "description": "**Paiptree 뉴스 자동 수집 작업이 완료되었습니다.**\n\n- **결과**: ${STATUS_MSG}\n- **요약**: ${SUMMARY}\n- **워크플로우**: ${{ github.workflow }}\n\n[🔗 실행 로그 바로가기](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})",
+            "color": ${COLOR},
             "footer": {
               "text": "Paiptree News Collector"
             },
-            "timestamp": "${{ fromJson(steps.get-time.outputs.json).utc }}"
-          }
-    - name: Get current time
-      id: get-time
-      uses: josStorer/get-current-time@v2
-      with:
-        format: YYYY-MM-DDTHH:mm:ss.SSSZ
-        utcOffset: "+09:00"
+            "timestamp": "$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+          }]
+        }
+        EOF
+        )
+
+        # curl로 웹훅 전송
+        curl -X POST -H "Content-Type: application/json" -d "$JSON_PAYLOAD" "$DISCORD_WEBHOOK_URL"
