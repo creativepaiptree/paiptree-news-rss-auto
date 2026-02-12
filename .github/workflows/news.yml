@@ -3,111 +3,175 @@ name: Paiptree News Collector
 on:
   schedule:
     # 매일 오전 8시 (KST) = UTC 23시에 실행
-    - cron: '0 23 * * *'
-  
+    - cron: "0 23 * * *"
+
   # 수동 실행 가능
   workflow_dispatch:
 
 jobs:
   collect-news:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: 저장소 체크아웃
-      uses: actions/checkout@v4
-    
-    - name: Python 설정
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-        cache: 'pip'
-    
-    - name: 의존성 설치
-      run: |
-        pip install --upgrade pip
-        pip install -r requirements.txt
-    
-    - name: 환경변수 검증
-      env:
-        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-        GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
-      run: |
-        if [[ -z "$GOOGLE_CREDENTIALS" ]]; then
-          echo "❌ GOOGLE_CREDENTIALS 누락"
-          exit 1
-        fi
-        if [[ -z "$GOOGLE_SHEETS_ID" ]]; then
-          echo "❌ GOOGLE_SHEETS_ID 누락"
-          exit 1
-        fi
-        echo "✅ 환경변수 확인 완료"
-    
-    - name: 뉴스 수집 실행 (재시도 포함)
-      id: scrape
-      env:
-        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-        GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
-      run: |
-        echo "🚀 Paiptree 뉴스 수집 시작"
-        echo "📅 실행 시간: $(date)"
-        
-        # 최종 실행 결과를 캡처하기 위해 파일로 출력
-        output_log="scrape_output.log"
-        
-        for i in {1..3}; do
-          if python rss_scraper.py | tee -a $output_log; then
-            echo "✅ 수집 성공!"
-            # 성공 시 결과에서 새로 추가된 뉴스 개수 추출
-            result_line=$(grep "새로 추가" $output_log | tail -n 1)
-            echo "result_summary=$result_line" >> $GITHUB_OUTPUT
-            exit 0
-          else
-            echo "❌ 시도 $i 실패"
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 설정
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 의존성 설치
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 환경변수 검증
+        env:
+          PAIPTREE_API_URL: ${{ secrets.PAIPTREE_API_URL }}
+          NEWS_INGEST_SECRET: ${{ secrets.NEWS_INGEST_SECRET }}
+        run: |
+          if [[ -z "$PAIPTREE_API_URL" ]]; then
+            echo "❌ PAIPTREE_API_URL 누락"
+            exit 1
+          fi
+          if [[ -z "$NEWS_INGEST_SECRET" ]]; then
+            echo "❌ NEWS_INGEST_SECRET 누락"
+            exit 1
+          fi
+          if [[ ! "$PAIPTREE_API_URL" =~ ^https?:// ]]; then
+            echo "❌ PAIPTREE_API_URL 형식 오류 (http/https 필요)"
+            exit 1
+          fi
+          echo "✅ 환경변수 확인 완료"
+
+      - name: 뉴스 수집 실행 (재시도 포함)
+        id: scrape
+        env:
+          INITIAL_COLLECTION: "false"
+          CONTENT_TAB: "news"
+          OUTPUT_JSON_PATH: "dist/news_payload.json"
+          OUTPUT_CSV_PATH: "news_data.csv"
+        run: |
+          set -euo pipefail
+
+          echo "🚀 Paiptree 뉴스 수집 시작"
+          echo "📅 실행 시간: $(date)"
+
+          output_log="scrape_output.log"
+          rm -f "$output_log"
+
+          for i in {1..3}; do
+            if python rss_scraper.py | tee -a "$output_log"; then
+              echo "✅ 수집 성공!"
+              if [[ -f dist/news_payload.json ]]; then
+                count=$(python - <<'PY'
+          import json
+          try:
+              with open("dist/news_payload.json", "r", encoding="utf-8") as f:
+                  data = json.load(f)
+              print(len(data.get("rows", [])))
+          except Exception:
+              print(0)
+          PY
+                )
+                echo "result_summary=수집 완료 (${count}건 payload 생성)" >> "$GITHUB_OUTPUT"
+                exit 0
+              else
+                echo "❌ dist/news_payload.json 파일이 생성되지 않았습니다."
+              fi
+            else
+              echo "❌ 시도 $i 실패"
+            fi
+
             if [[ $i -eq 3 ]]; then
               echo "💥 모든 재시도 실패"
-              echo "result_summary=모든 재시도 실패" >> $GITHUB_OUTPUT
+              echo "result_summary=모든 재시도 실패" >> "$GITHUB_OUTPUT"
               exit 1
             fi
             sleep 30
+          done
+
+      - name: Supabase API 업로드 (재시도 포함)
+        id: upload
+        env:
+          PAIPTREE_API_URL: ${{ secrets.PAIPTREE_API_URL }}
+          NEWS_INGEST_SECRET: ${{ secrets.NEWS_INGEST_SECRET }}
+        run: |
+          set -euo pipefail
+
+          echo "🚚 Supabase API 업로드 시작"
+
+          for i in {1..3}; do
+            status=$(curl -sS -o upload_response.json -w "%{http_code}" \
+              -X POST "${PAIPTREE_API_URL}/api/batch/collect-news" \
+              -H "Content-Type: application/json" \
+              -H "x-news-ingest-secret: ${NEWS_INGEST_SECRET}" \
+              --data @dist/news_payload.json || echo "000")
+
+            echo "HTTP 상태코드: $status"
+            cat upload_response.json || true
+
+            if [[ "$status" == "200" ]]; then
+              upserted=$(python - <<'PY'
+          import json
+          try:
+              with open("upload_response.json", "r", encoding="utf-8") as f:
+                  data = json.load(f)
+              print(data.get("upserted", 0))
+          except Exception:
+              print(0)
+          PY
+              )
+              echo "result_summary=업로드 성공 (${upserted}건 upsert)" >> "$GITHUB_OUTPUT"
+              echo "✅ 업로드 성공"
+              exit 0
+            fi
+
+            echo "❌ 업로드 시도 $i 실패"
+            if [[ $i -eq 3 ]]; then
+              echo "result_summary=업로드 실패 (HTTP ${status})" >> "$GITHUB_OUTPUT"
+              exit 1
+            fi
+            sleep 20
+          done
+
+      - name: Discord 알림 전송
+        if: always()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "⚠️ Discord 웹훅 URL이 설정되지 않았습니다. 알림을 건너뜁니다."
+            exit 0
           fi
-        done
 
-    - name: Discord 알림 전송
-      if: always()
-      env:
-        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-      run: |
-        if [ -z "$DISCORD_WEBHOOK_URL" ]; then
-          echo "⚠️ Discord 웹훅 URL이 설정되지 않았습니다. 알림을 건너뜁니다."
-          exit 0
-        fi
-        
-        STATUS="${{ job.status }}"
-        if [ "$STATUS" == "success" ]; then
-          COLOR=2664261  # 초록색
-          STATUS_MSG="성공"
-        else
-          COLOR=14502728 # 빨간색
-          STATUS_MSG="실패"
-        fi
-        
-        SUMMARY="${{ steps.scrape.outputs.result_summary || '실행 정보 없음' }}"
-        
-        # JSON 페이로드 생성
-        JSON_PAYLOAD=$(cat <<EOF
-        {
-          "embeds": [{
-            "title": "📰 뉴스 수집 결과: ${STATUS_MSG}",
-            "description": "**Paiptree 뉴스 자동 수집 작업이 완료되었습니다.**\n\n- **결과**: ${STATUS_MSG}\n- **요약**: ${SUMMARY}\n- **워크플로우**: ${{ github.workflow }}\n\n[🔗 실행 로그 바로가기](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})",
-            "color": ${COLOR},
-            "footer": {
-              "text": "Paiptree News Collector"
-            },
-            "timestamp": "$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
-          }]
-        }
-        EOF
-        )
+          STATUS="${{ job.status }}"
+          if [ "$STATUS" == "success" ]; then
+            COLOR=2664261
+            STATUS_MSG="성공"
+          else
+            COLOR=14502728
+            STATUS_MSG="실패"
+          fi
 
-        # curl로 웹훅 전송
-        curl -X POST -H "Content-Type: application/json" -d "$JSON_PAYLOAD" "$DISCORD_WEBHOOK_URL"
+          SCRAPE_SUMMARY="${{ steps.scrape.outputs.result_summary || '수집 정보 없음' }}"
+          UPLOAD_SUMMARY="${{ steps.upload.outputs.result_summary || '업로드 정보 없음' }}"
+
+          JSON_PAYLOAD=$(cat <<EOF
+          {
+            "embeds": [{
+              "title": "📰 뉴스 수집 결과: ${STATUS_MSG}",
+              "description": "**Paiptree 뉴스 자동 수집 작업이 완료되었습니다.**\n\n- **결과**: ${STATUS_MSG}\n- **수집**: ${SCRAPE_SUMMARY}\n- **업로드**: ${UPLOAD_SUMMARY}\n- **워크플로우**: ${{ github.workflow }}\n\n[🔗 실행 로그 바로가기](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})",
+              "color": ${COLOR},
+              "footer": {
+                "text": "Paiptree News Collector"
+              },
+              "timestamp": "$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+            }]
+          }
+          EOF
+          )
+
+          curl -X POST -H "Content-Type: application/json" -d "$JSON_PAYLOAD" "$DISCORD_WEBHOOK_URL"
