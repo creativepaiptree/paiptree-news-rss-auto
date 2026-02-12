@@ -1,404 +1,333 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import csv
 import feedparser
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+import hashlib
+import html
 import json
 import os
-import time
-import hashlib
-import requests
 import re
-from datetime import datetime, timedelta
 import sys
+import time
+from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-# 환경변수에서 설정 읽기
-def get_config():
-    """환경변수에서 설정 정보 읽기"""
-    try:
-        # Google Sheets 인증 정보
-        google_creds = os.environ.get('GOOGLE_CREDENTIALS')
-        if not google_creds:
-            raise ValueError("GOOGLE_CREDENTIALS 환경변수가 설정되지 않았습니다.")
-        
-        # JSON 파싱 (환경변수는 이미 JSON 문자열)
-        try:
-            creds_dict = json.loads(google_creds)
-            print("✅ Google Credentials JSON 파싱 성공")
-        except json.JSONDecodeError as e:
-            print(f"❌ JSON 파싱 실패: {e}")
-            print(f"📝 받은 데이터 길이: {len(google_creds)} 문자")
-            print(f"📝 데이터 시작 부분: {google_creds[:100]}...")
-            raise ValueError(f"GOOGLE_CREDENTIALS JSON 파싱 실패: {e}")
-        
-        # Google Sheets ID
-        sheets_id = os.environ.get('GOOGLE_SHEETS_ID')
-        if not sheets_id:
-            raise ValueError("GOOGLE_SHEETS_ID 환경변수가 설정되지 않았습니다.")
-        
-        print(f"✅ Google Sheets ID: {sheets_id[:20]}...")
-        return creds_dict, sheets_id
-        
-    except Exception as e:
-        print(f"❌ 설정 읽기 실패: {e}")
-        sys.exit(1)
-
-# RSS 피드 목록 - 네이버와 구글 뉴스 검색 (키워드별)
+# RSS 피드 목록 - 네이버 + 구글 뉴스
 RSS_FEEDS = [
-    # 네이버 뉴스 RSS
     "http://newssearch.naver.com/search.naver?where=rss&query=파이프트리",
-    "http://newssearch.naver.com/search.naver?where=rss&query=파머스마인드", 
+    "http://newssearch.naver.com/search.naver?where=rss&query=파머스마인드",
     "http://newssearch.naver.com/search.naver?where=rss&query=paiptree",
     "http://newssearch.naver.com/search.naver?where=rss&query=farmersmind",
-    # 구글 뉴스 RSS
     "https://news.google.com/rss/search?q=파이프트리&hl=ko&gl=KR&ceid=KR:ko",
     "https://news.google.com/rss/search?q=파머스마인드&hl=ko&gl=KR&ceid=KR:ko",
     "https://news.google.com/rss/search?q=paiptree&hl=ko&gl=KR&ceid=KR:ko",
-    "https://news.google.com/rss/search?q=farmersmind&hl=ko&gl=KR&ceid=KR:ko"
+    "https://news.google.com/rss/search?q=farmersmind&hl=ko&gl=KR&ceid=KR:ko",
 ]
 
-# 검색 키워드 (이미 RSS에서 필터링되므로 전체 매칭)
-KEYWORDS = [
-    "파이프트리", "파머스마인드", "paiptree", "farmersmind"
-]
+KEYWORDS = ["파이프트리", "파머스마인드", "paiptree", "farmersmind"]
+
+
+def get_runtime_config():
+    initial_mode = os.environ.get("INITIAL_COLLECTION", "false").lower() == "true"
+    content_tab = os.environ.get("CONTENT_TAB", "news").lower()
+    content_tab = "social" if content_tab == "social" else "news"
+
+    output_json = os.environ.get("OUTPUT_JSON_PATH", "dist/news_payload.json")
+    output_csv = os.environ.get("OUTPUT_CSV_PATH", "news_data.csv")
+
+    return {
+        "initial_mode": initial_mode,
+        "content_tab": content_tab,
+        "output_json": output_json,
+        "output_csv": output_csv,
+    }
+
+
+def normalize_url(url):
+    value = (url or "").strip()
+    if not value:
+        return ""
+
+    try:
+        parsed = urlparse(value)
+        filtered_query = [
+            (key, val)
+            for key, val in parse_qsl(parsed.query, keep_blank_values=False)
+            if key.lower() not in {"fbclid", "gclid", "mc_cid", "mc_eid"}
+            and not key.lower().startswith("utm_")
+        ]
+        cleaned = parsed._replace(query=urlencode(filtered_query, doseq=True), fragment="")
+        return urlunparse(cleaned)
+    except Exception:
+        return value
+
 
 def clean_news_description(description, source_name):
-    """
-    뉴스 description에서 언론사명과 불필요한 요소 제거
-    """
     if not description:
         return ""
-    
-    # HTML 태그 제거
-    description = re.sub(r'<[^>]+>', '', description)
-    
-    # HTML 엔티티 디코딩
-    import html
-    description = html.unescape(description)
-    
-    # 언론사명 제거 패턴들
-    source_clean = re.escape(source_name) if source_name else ''
-    
-    # 패턴 1: "내용 - 언론사명" (끝부분)
-    description = re.sub(rf'\s*-\s*{source_clean}\s*$', '', description, flags=re.IGNORECASE)
-    
-    # 패턴 2: "내용 (언론사명)" (끝부분)
-    description = re.sub(rf'\s*\({source_clean}\)\s*$', '', description, flags=re.IGNORECASE)
-    
-    # 패턴 3: "내용... 언론사명" (끝부분)
-    description = re.sub(rf'\s*{source_clean}\s*$', '', description, flags=re.IGNORECASE)
-    
-    # 일반적인 뉴스 제공업체 제거 패턴
-    news_providers = ['연합뉴스', '뉴스1', '뉴시스', 'YTN', 'SBS', 'MBC', 'KBS', '조선일보', '동아일보', '중앙일보', '한겨레', '경향신문']
-    for provider in news_providers:
-        provider_escaped = re.escape(provider)
-        description = re.sub(rf'\s*-\s*{provider_escaped}\s*$', '', description, flags=re.IGNORECASE)
-        description = re.sub(rf'\s*\({provider_escaped}\)\s*$', '', description, flags=re.IGNORECASE)
-        description = re.sub(rf'\s*{provider_escaped}\s*$', '', description, flags=re.IGNORECASE)
-    
-    # 불필요한 문구 제거
-    unwanted_phrases = [
-        r'\s*\[.*?\]\s*$',  # [기자명] 등
-        r'\s*=.*?=\s*$',   # =연합뉴스= 등
-        r'\s*\(.*?기자\)\s*$',  # (홍길동 기자) 등
+
+    cleaned = re.sub(r"<[^>]+>", "", description)
+    cleaned = html.unescape(cleaned)
+
+    source_clean = re.escape(source_name) if source_name else ""
+    if source_clean:
+        cleaned = re.sub(rf"\s*-\s*{source_clean}\s*$", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(rf"\s*\({source_clean}\)\s*$", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(rf"\s*{source_clean}\s*$", "", cleaned, flags=re.IGNORECASE)
+
+    providers = [
+        "연합뉴스", "뉴스1", "뉴시스", "YTN", "SBS", "MBC", "KBS",
+        "조선일보", "동아일보", "중앙일보", "한겨레", "경향신문",
     ]
-    
-    for pattern in unwanted_phrases:
-        description = re.sub(pattern, '', description, flags=re.IGNORECASE)
-    
-    # 다중 공백을 단일 공백으로 변환
-    description = re.sub(r'\s+', ' ', description)
-    
-    # 앞뒤 공백 제거
-    description = description.strip()
-    
-    return description
+    for provider in providers:
+        escaped = re.escape(provider)
+        cleaned = re.sub(rf"\s*-\s*{escaped}\s*$", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(rf"\s*\({escaped}\)\s*$", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(rf"\s*{escaped}\s*$", "", cleaned, flags=re.IGNORECASE)
 
-def setup_google_sheets(creds_dict, sheets_id):
-    """Google Sheets 연결 설정"""
-    try:
-        print("🔗 Google Sheets 연결 중...")
-        
-        # 인증 범위 설정
-        scope = [
-            'https://spreadsheets.google.com/feeds',
-            'https://www.googleapis.com/auth/drive'
-        ]
-        
-        # 서비스 계정 인증
-        credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        gc = gspread.authorize(credentials)
-        
-        # 스프레드시트 열기
-        sheet = gc.open_by_key(sheets_id)
-        
-        # news_data 워크시트 가져오기 또는 생성
+    patterns = [
+        r"\s*\[.*?\]\s*$",
+        r"\s*=.*?=\s*$",
+        r"\s*\(.*?기자\)\s*$",
+    ]
+    for pattern in patterns:
+        cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def parse_entry_datetime(entry):
+    published = entry.get("published_parsed") or entry.get("updated_parsed")
+    if published:
         try:
-            worksheet = sheet.worksheet('news_data')
-            print("✅ 기존 news_data 시트 발견")
-        except gspread.WorksheetNotFound:
-            print("📝 news_data 시트 생성 중...")
-            worksheet = sheet.add_worksheet(title='news_data', rows=1000, cols=21)
-            
-            # Materials 표준 21개 컬럼 (A-U) 헤더 추가
-            headers = [
-                'id', 'title', 'description', 'category', 'tags',                    # A-E
-                'upload_date', 'file_size', 'file_format', 'dimensions',             # F-I
-                'creator', 'brand_alignment', 'usage_rights', 'version',             # J-M
-                'download_count', 'rating', 'thumbnail_url', 'file_url',            # N-Q
-                'original_url', 'status', 'featured', 'created_at'                  # R-U
-            ]
-            worksheet.append_row(headers)
-            print("✅ news_data 시트 생성 완료")
-        
-        return worksheet
-    except Exception as e:
-        print(f"❌ Google Sheets 연결 실패: {e}")
-        sys.exit(1)
+            return datetime(*published[:6], tzinfo=timezone.utc)
+        except Exception:
+            pass
+    return datetime.now(timezone.utc)
 
-def fetch_rss_news(rss_url, keywords, initial_mode=False):
-    """RSS 피드에서 뉴스 가져오기"""
+
+def to_iso8601(dt_obj):
+    return dt_obj.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def extract_source_name(feed, entry, link):
+    source = ""
+    entry_source = entry.get("source")
+    if isinstance(entry_source, dict):
+        source = (entry_source.get("title") or "").strip()
+
+    if not source:
+        feed_title = ""
+        if hasattr(feed, "feed"):
+            feed_title = (getattr(feed.feed, "title", "") or "").strip()
+        source = feed_title
+
+    if not source:
+        try:
+            hostname = urlparse(link).hostname or ""
+            source = hostname.replace("www.", "")
+        except Exception:
+            source = "Unknown"
+
+    return source or "Unknown"
+
+
+def matched_keywords(title, description, keywords):
+    content = f"{title} {description}".lower()
+    found = [kw for kw in keywords if kw.lower() in content]
+    # 중복 제거 + 순서 유지
+    return list(dict.fromkeys(found))
+
+
+def fetch_rss_news(rss_url, keywords, initial_mode, content_tab):
     news_items = []
-    
+
     try:
         print(f"📡 RSS 피드 확인 중: {rss_url}")
-        
-        # RSS 피드 파싱
         feed = feedparser.parse(rss_url)
-        
-        if feed.bozo:
-            print(f"⚠️ RSS 피드 파싱 경고: {rss_url}")
-        
-        total_entries = len(feed.entries) if hasattr(feed, 'entries') else 0
-        print(f"📊 총 {total_entries}개 RSS 엔트리 발견")
-        
-        # 초기 모드일 때는 모든 뉴스 수집, 일반 모드일 때는 최근 뉴스만
-        entries_to_process = feed.entries if hasattr(feed, 'entries') else []
-        
+
+        if getattr(feed, "bozo", False):
+            print(f"⚠️ RSS 파싱 경고: {rss_url}")
+
+        entries = list(getattr(feed, "entries", []))
+        print(f"📊 총 {len(entries)}개 엔트리 발견")
+
         if not initial_mode:
-            # 일반 모드: 최근 7일 이내 뉴스만
-            seven_days_ago = datetime.now() - timedelta(days=7)
-            recent_entries = []
-            for entry in entries_to_process:
-                published = entry.get('published_parsed')
-                if published:
-                    pub_date = datetime(*published[:6])
-                    if pub_date >= seven_days_ago:
-                        recent_entries.append(entry)
-                else:
-                    # 날짜 정보가 없으면 최근으로 간주
-                    recent_entries.append(entry)
-            entries_to_process = recent_entries
-            print(f"🗓️ 최근 7일 이내 뉴스: {len(entries_to_process)}개")
+            cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+            filtered = []
+            for entry in entries:
+                published_at = parse_entry_datetime(entry)
+                if published_at >= cutoff:
+                    filtered.append(entry)
+            entries = filtered
+            print(f"🗓️ 최근 7일 기준 {len(entries)}개 처리")
         else:
-            print(f"🎯 초기 수집 모드: 모든 가능한 뉴스 ({len(entries_to_process)}개) 처리")
-        
-        # 각 뉴스 아이템 확인
-        for entry in entries_to_process:
-            title = entry.get('title', '')
-            description = entry.get('description', '') or entry.get('summary', '')
-            link = entry.get('link', '')
-            
-            # 키워드 매칭 확인
-            content_to_check = f"{title} {description}".lower()
-            matched_keywords = [kw for kw in keywords if kw.lower() in content_to_check]
-            
-            if matched_keywords:
-                # 발행일자 처리
-                published = entry.get('published_parsed')
-                if published:
-                    pub_date = datetime(*published[:6]).strftime('%Y-%m-%d')
-                    pub_datetime = datetime(*published[:6])
-                else:
-                    pub_date = datetime.now().strftime('%Y-%m-%d')
-                    pub_datetime = datetime.now()
-                
-                # 언론사명 추출
-                source = feed.feed.get('title', 'Unknown')
-                
-                # 🚀 Description 정리 적용
-                cleaned_description = clean_news_description(description, source)
-                
-                # 🚀 이미지 없이 단순한 뉴스 수집으로 변경
-                thumbnail_url = ""  # 이미지 기능 제거
-                
-                news_item = {
-                    'title': title[:200],  # 제목 길이 제한
-                    'description': cleaned_description[:500],  # 정리된 설명 사용
-                    'category': source,
-                    'tags': ','.join(matched_keywords),
-                    'upload_date': pub_date,
-                    'pub_datetime': pub_datetime,  # 정렬용
-                    'download_count': 0,  # 기본값 0
-                    'thumbnail_url': thumbnail_url,
-                    'original_url': link
+            print(f"🎯 초기 수집 모드: {len(entries)}개 처리")
+
+        for entry in entries:
+            title = (entry.get("title") or "").strip()
+            raw_description = (entry.get("description") or entry.get("summary") or "").strip()
+            link = normalize_url(entry.get("link") or "")
+
+            if not title or not link:
+                continue
+
+            tags = matched_keywords(title, raw_description, keywords)
+            if not tags:
+                continue
+
+            published_dt = parse_entry_datetime(entry)
+            source = extract_source_name(feed, entry, link)
+            description = clean_news_description(raw_description, source)
+
+            news_items.append(
+                {
+                    "title": title[:200],
+                    "description": description[:500],
+                    "category": source[:100],
+                    "tags": ",".join(tags),
+                    "date": to_iso8601(published_dt),
+                    "download_count": 0,
+                    "original_url": link,
+                    "tab": content_tab,
+                    "_pub_dt": published_dt,
                 }
-                
-                news_items.append(news_item)
-                print(f"✅ 키워드 매칭: {title[:50]}... (키워드: {matched_keywords}) [{pub_date}]")
-                print(f"🧹 정리된 설명: {cleaned_description[:100]}...")
-        
-        print(f"📊 {rss_url}에서 {len(news_items)}개 매칭 뉴스 발견")
+            )
+
+        print(f"✅ 매칭 뉴스 {len(news_items)}개")
         return news_items
-        
-    except Exception as e:
-        print(f"❌ RSS 피드 처리 실패 {rss_url}: {e}")
+
+    except Exception as error:
+        print(f"❌ RSS 처리 실패 ({rss_url}): {error}")
         return []
 
-def generate_sequential_id(worksheet):
-    """기존 데이터 확인해서 다음 번호 생성 (001, 002, 003...)"""
-    try:
-        all_records = worksheet.get_all_records()
-        if not all_records:
-            return "001"
-        
-        # 기존 ID에서 숫자 추출해서 최대값 찾기
-        max_num = 0
-        for record in all_records:
-            try:
-                current_id = str(record.get('id', '0'))
-                # 숫자만 추출 (앞의 0 제거)
-                num = int(current_id.lstrip('0')) if current_id.strip() else 0
-                max_num = max(max_num, num)
-            except (ValueError, TypeError):
-                continue
-        
-        # 다음 번호를 3자리로 포맷팅
-        next_num = max_num + 1
-        return f"{next_num:03d}"
-        
-    except Exception as e:
-        print(f"⚠️ ID 생성 실패, 임시 ID 사용: {e}")
-        # 실패시 타임스탬프 기반 ID
-        return f"{int(time.time() % 10000):04d}"
 
-def is_duplicate_news(worksheet, original_url):
-    """중복 뉴스 확인 (URL 기반)"""
-    try:
-        # 모든 기존 데이터 가져오기
-        all_records = worksheet.get_all_records()
-        
-        for record in all_records:
-            # URL이 일치하면 중복
-            if record.get('original_url') == original_url:
-                return True
-        
-        return False
-    except Exception as e:
-        print(f"⚠️ 중복 확인 실패: {e}")
-        return False
+def dedupe_news(news_items):
+    unique = {}
+    for item in news_items:
+        key = item["original_url"]
+        existing = unique.get(key)
+        if not existing:
+            unique[key] = item
+            continue
 
-def add_news_to_sheet(worksheet, news_item):
-    """Google Sheets에 뉴스 추가"""
-    try:
-        # 중복 확인 (URL 기반)
-        if is_duplicate_news(worksheet, news_item['original_url']):
-            print(f"⏭️ 중복 뉴스 스킵: {news_item['title'][:50]}...")
-            return False
-        
-        # 순차 ID 생성
-        news_id = generate_sequential_id(worksheet)
-        
-        # Materials 표준 21개 컬럼에 맞춘 데이터 생성
-        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
-        row_data = [
-            news_id,                                    # A: id
-            news_item['title'],                         # B: title
-            news_item['description'],                   # C: description
-            news_item['category'],                      # D: category (언론사)
-            news_item['tags'],                          # E: tags
-            news_item['upload_date'],                   # F: upload_date
-            'N/A',                                      # G: file_size (뉴스는 파일 아님)
-            'news',                                     # H: file_format (뉴스 타입)
-            'N/A',                                      # I: dimensions
-            news_item['category'],                      # J: creator (언론사명)
-            'high',                                     # K: brand_alignment (브랜드 연관도 높음)
-            'read-only',                               # L: usage_rights (읽기전용)
-            '1.0',                                      # M: version
-            news_item['download_count'],                # N: download_count
-            '0',                                        # O: rating (기본 0점)
-            '',                                         # P: thumbnail_url (이미지 제거)
-            news_item['original_url'],                  # Q: file_url (원문 링크)
-            news_item['original_url'],                  # R: original_url (동일)
-            'active',                                   # S: status (활성 상태)
-            'false',                                    # T: featured (기본 비추천)
-            current_time                                # U: created_at (생성시간)
-        ]
-        
-        worksheet.append_row(row_data)
-        print(f"✅ 뉴스 추가 (ID: {news_id}): {news_item['title'][:50]}...")
-        return True
-        
-    except Exception as e:
-        print(f"❌ 뉴스 추가 실패: {e}")
-        return False
+        # 같은 URL이면 더 긴 description을 가진 쪽 선택
+        if len(item.get("description", "")) > len(existing.get("description", "")):
+            unique[key] = item
+
+    return list(unique.values())
+
+
+def attach_stable_ids(news_items, content_tab):
+    for item in news_items:
+        digest = hashlib.sha1(f"{content_tab}:{item['original_url']}".encode("utf-8")).hexdigest()[:24]
+        item["id"] = f"{content_tab}_{digest}"
+
+
+def write_json_payload(news_items, output_path, content_tab):
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
+    rows = [
+        {
+            "id": item["id"],
+            "tab": item["tab"],
+            "title": item["title"],
+            "description": item["description"],
+            "category": item["category"],
+            "tags": item["tags"],
+            "date": item["date"],
+            "download_count": item["download_count"],
+            "original_url": item["original_url"],
+        }
+        for item in news_items
+    ]
+
+    payload = {"tab": content_tab, "rows": rows}
+    with open(output_path, "w", encoding="utf-8") as file:
+        json.dump(payload, file, ensure_ascii=False, indent=2)
+
+    print(f"✅ JSON 저장 완료: {output_path} ({len(rows)}건)")
+
+
+def write_csv_export(news_items, output_path):
+    headers = ["id", "title", "description", "category", "tags", "date", "download_count", "original_url", "tab"]
+    with open(output_path, "w", encoding="utf-8-sig", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=headers)
+        writer.writeheader()
+        for item in news_items:
+            writer.writerow(
+                {
+                    "id": item["id"],
+                    "title": item["title"],
+                    "description": item["description"],
+                    "category": item["category"],
+                    "tags": item["tags"],
+                    "date": item["date"],
+                    "download_count": item["download_count"],
+                    "original_url": item["original_url"],
+                    "tab": item["tab"],
+                }
+            )
+    print(f"✅ CSV 저장 완료: {output_path} ({len(news_items)}건)")
+
 
 def main():
-    """메인 실행 함수"""
+    config = get_runtime_config()
+    initial_mode = config["initial_mode"]
+    content_tab = config["content_tab"]
+    output_json = config["output_json"]
+    output_csv = config["output_csv"]
+
     print("🚀 Paiptree 뉴스 수집 시작")
     print(f"📅 실행 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("🧹 Description 정리 기능 활성화됨")
-    
-    # 초기 수집 모드 확인 (환경변수)
-    initial_mode = os.environ.get('INITIAL_COLLECTION', 'false').lower() == 'true'
-    
-    if initial_mode:
-        print("🎯 초기 대량 수집 모드 활성화")
-        print("📚 가능한 모든 과거 뉴스 수집 중...")
-    else:
-        print("📅 일반 모드: 최근 7일 이내 뉴스만 수집")
-    
-    start_time = time.time()
-    
-    # 설정 읽기
-    creds_dict, sheets_id = get_config()
-    
-    # Google Sheets 연결
-    worksheet = setup_google_sheets(creds_dict, sheets_id)
-    
-    # 뉴스 수집
-    total_collected = 0
-    total_found = 0
-    all_news_items = []
-    
-    print(f"🔍 {len(RSS_FEEDS)}개 RSS 피드에서 뉴스 검색 중...")
-    print(f"🏷️ 검색 키워드: {', '.join(KEYWORDS)}")
-    
+    print(f"🎯 수집 모드: {'초기 대량 수집' if initial_mode else '일반 수집(최근 7일)'}")
+    print(f"🗂️ 콘텐츠 탭: {content_tab}")
+
+    started_at = time.time()
+    all_news = []
+
+    print(f"🔍 RSS 피드 {len(RSS_FEEDS)}개 수집 시작")
+    print(f"🏷️ 키워드: {', '.join(KEYWORDS)}")
+
     for rss_url in RSS_FEEDS:
-        news_items = fetch_rss_news(rss_url, KEYWORDS, initial_mode)
-        total_found += len(news_items)
-        all_news_items.extend(news_items)
-    
-    # 발행일자 기준으로 정렬 (오래된 것부터)
-    all_news_items.sort(key=lambda x: x.get('pub_datetime', datetime.now()))
-    
-    print(f"\n📊 총 {len(all_news_items)}개 뉴스를 시간순으로 정렬하여 추가 중...")
-    
-    # 시트에 추가
-    for news_item in all_news_items:
-        if add_news_to_sheet(worksheet, news_item):
-            total_collected += 1
-        
-        # API 호출 제한 고려하여 잠시 대기
-        time.sleep(0.5)
-    
-    # 실행 결과
-    end_time = time.time()
-    execution_time = round(end_time - start_time, 2)
-    
-    print(f"\n🎉 뉴스 수집 완료!")
-    print(f"🎯 수집 모드: {'초기 대량 수집' if initial_mode else '일반 수집'}")
-    print(f"📊 총 발견: {total_found}개")
-    print(f"✅ 새로 추가: {total_collected}개")
-    print(f"⏱️ 실행 시간: {execution_time}초")
-    print(f"🧹 모든 description이 언론사명 제거 처리됨")
-    
-    if total_collected == 0:
-        print("ℹ️ 새로운 뉴스가 없습니다.")
-    else:
-        print(f"🌟 {total_collected}개의 새로운 뉴스가 추가되었습니다!")
+        items = fetch_rss_news(rss_url, KEYWORDS, initial_mode, content_tab)
+        all_news.extend(items)
+        time.sleep(0.2)
+
+    found_count = len(all_news)
+    deduped = dedupe_news(all_news)
+    deduped_count = len(deduped)
+
+    # 오래된 뉴스 -> 최신 뉴스 순으로 정렬
+    deduped.sort(key=lambda item: item.get("_pub_dt", datetime.now(timezone.utc)))
+
+    attach_stable_ids(deduped, content_tab)
+
+    # 내부용 키 제거
+    for item in deduped:
+        item.pop("_pub_dt", None)
+
+    write_json_payload(deduped, output_json, content_tab)
+    write_csv_export(deduped, output_csv)
+
+    elapsed = round(time.time() - started_at, 2)
+
+    print("\n🎉 뉴스 수집 완료")
+    print(f"📊 총 발견: {found_count}개")
+    print(f"🧹 중복 제거 후: {deduped_count}개")
+    print(f"✅ 결과 JSON: {output_json}")
+    print(f"✅ 결과 CSV: {output_csv}")
+    print(f"⏱️ 실행 시간: {elapsed}초")
+
+    if deduped_count == 0:
+        print("ℹ️ 신규 데이터가 없습니다.")
+
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        print(f"❌ 실행 실패: {error}")
+        sys.exit(1)
