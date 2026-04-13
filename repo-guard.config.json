@@ -1,0 +1,9 @@
+{
+  "expectedRepo": "creativepaiptree/paiptree-news-rss-auto",
+  "requiredPermission": "WRITE",
+  "allowedPermissions": ["WRITE", "MAINTAIN", "ADMIN"],
+  "notes": [
+    "This project must be pushed to the company GitHub repository.",
+    "The current authenticated GitHub account must have write-level access before push."
+  ]
+}
