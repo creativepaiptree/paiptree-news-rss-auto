@@ -9,8 +9,8 @@ Paiptree 관련 뉴스를 정기 수집해 payload로 정규화한 뒤, Paiptree
 - 적재 대상: `PAIPTREE_API_URL` 뒤의 뉴스 수집 API (`/api/batch/collect-news`)
 - 인증 방식: `NEWS_INGEST_SECRET` 헤더 기반 서버 검증
 - 운영 알림 방향:
-  - 현재: GitHub Actions → Discord webhook
-  - 전환 목표: Discord 알림 중지, Hermes cron이 진행상황/실패 여부를 감시·보고
+  - 현재: Hermes cron이 진행상황/성공·실패 여부를 감시·보고
+  - 변경 완료: GitHub Actions의 Discord webhook 알림 제거
 
 ## 🔄 자동화 시스템
 
@@ -60,7 +60,8 @@ Paiptree 관련 뉴스를 정기 수집해 payload로 정규화한 뒤, Paiptree
 - `NEWS_INGEST_SECRET`
   - `/api/batch/collect-news` 업로드용 인증 헤더 값
 - `DISCORD_WEBHOOK_URL`
-  - 현재는 사용 중이지만, 향후 운영 중지 대상
+  - 기존 Discord 알림용 Secret
+  - 현재 workflow 본선에서는 사용 중지 상태이며, 정리 대상
 
 주의:
 - README의 예전 Google Sheets 저장 설명은 더 이상 본선 운영 기준이 아닙니다.
